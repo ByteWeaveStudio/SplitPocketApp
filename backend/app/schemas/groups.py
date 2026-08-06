@@ -16,9 +16,18 @@ class CamelModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+# Python ints are unbounded and the columns are plain bigint, so without a
+# ceiling `amountMinor: 10**30` reaches Postgres and comes back as a 500, while
+# a merely enormous value is accepted and — since only the creator can delete
+# an expense — leaves every other member staring at a permanent junk balance.
+# 10^11 minor units is a billion in a two-decimal currency: far past any real
+# split, far short of bigint.
+MAX_AMOUNT_MINOR = 10**11
+
+
 class GroupCreate(CamelModel):
     name: str = Field(min_length=1, max_length=80)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=500)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
 
 
@@ -48,13 +57,13 @@ class AddMemberRequest(CamelModel):
 
 class SplitParticipantIn(CamelModel):
     user_id: UUID
-    owed_minor: int | None = Field(default=None, ge=0)
+    owed_minor: int | None = Field(default=None, ge=0, le=MAX_AMOUNT_MINOR)
     share_basis_points: int | None = Field(default=None, ge=0, le=10_000)
 
 
 class GroupExpenseCreate(CamelModel):
     description: str = Field(min_length=1, max_length=200)
-    amount_minor: int = Field(gt=0)
+    amount_minor: int = Field(gt=0, le=MAX_AMOUNT_MINOR)
     category_id: UUID | None = None
     date: date
     notes: str | None = Field(default=None, max_length=500)
@@ -90,7 +99,7 @@ class GroupExpenseOut(CamelModel):
 class SettlementCreate(CamelModel):
     from_user_id: UUID
     to_user_id: UUID
-    amount_minor: int = Field(gt=0)
+    amount_minor: int = Field(gt=0, le=MAX_AMOUNT_MINOR)
     note: str | None = Field(default=None, max_length=500)
     settled_at: datetime | None = None
 

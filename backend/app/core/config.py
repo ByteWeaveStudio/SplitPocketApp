@@ -15,7 +15,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    environment: str = "development"
+    # Defaults to production: a deploy that forgets to set ENVIRONMENT should
+    # lose /docs and /openapi.json, not publish them.
+    environment: str = "production"
     cors_origins: list[str] = [
         "http://localhost:5173",  # Vite dev server
         "http://127.0.0.1:5173",  # Vite dev server via loopback IP

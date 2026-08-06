@@ -128,8 +128,19 @@ async def add_member(group_id: UUID, payload: AddMemberRequest, user: CurrentUse
         group = await _fetch_group_for_member(conn, group_id, user.id)
         if group["archived_at"] is not None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "This group is archived.")
+        # Resolve against auth.users, not profiles.email: the profiles copy is
+        # a mirror the account holder can edit, so matching on it let anyone
+        # claim someone else's address and be invited in their place. This
+        # assumes email confirmation stays enabled on the Supabase project --
+        # an unconfirmed signup is the same spoof one layer down.
         cursor = await conn.execute(
-            "select id::text as id from public.profiles where lower(email) = %s", (email,)
+            """
+            select p.id::text as id
+            from public.profiles p
+            join auth.users u on u.id = p.id
+            where lower(u.email) = %s
+            """,
+            (email,),
         )
         profile = await cursor.fetchone()
         if profile is None:
@@ -350,11 +361,29 @@ async def update_group_expense(
         existing = await cursor.fetchone()
         if existing is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Expense not found.")
+        group_id = UUID(existing["group_id"])
+        # Re-check membership on every edit, not just at creation: leaving (or
+        # being removed from) a group has to revoke write access to the
+        # expenses added while inside it, otherwise the id stays a live handle
+        # on the group's ledger.
+        cursor = await conn.execute(
+            """
+            select g.archived_at
+            from public.groups g
+            join public.group_members m on m.group_id = g.id and m.user_id = %s
+            where g.id = %s
+            """,
+            (user.id, group_id),
+        )
+        group = await cursor.fetchone()
+        if group is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Expense not found.")
         if existing["user_id"] != user.id:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, "Only the person who added an expense can edit it."
             )
-        group_id = UUID(existing["group_id"])
+        if group["archived_at"] is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "This group is archived.")
         computed = await _validated_splits(conn, group_id, user, payload)
         async with conn.transaction():
             cursor = await conn.execute(

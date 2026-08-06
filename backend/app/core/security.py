@@ -34,19 +34,49 @@ def _jwks_client() -> jwt.PyJWKClient:
     return jwt.PyJWKClient(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
 
 
+# Verification algorithms are pinned per scheme rather than taken from the
+# token's own header. Passing algorithms=[header["alg"]] lets the token choose
+# how it is checked, which is the setup alg-confusion attacks need: the moment
+# a project has both a shared secret and asymmetric keys, an attacker picks
+# whichever one they can forge against.
+_ASYMMETRIC_ALGORITHMS = ["RS256", "ES256", "EdDSA"]
+_SYMMETRIC_ALGORITHMS = ["HS256"]
+
+
 def decode_token(token: str) -> dict[str, Any]:
     settings = get_settings()
     header = jwt.get_unverified_header(token)
     algorithm: str = header.get("alg", "")
 
-    if algorithm.startswith("HS"):
+    # Screen the header before resolving a key, so "none" and other unsupported
+    # algorithms are refused outright instead of reaching the JWKS fetch.
+    if algorithm in _SYMMETRIC_ALGORITHMS:
         if not settings.supabase_jwt_secret:
             raise jwt.InvalidTokenError("SUPABASE_JWT_SECRET is not configured.")
         key: Any = settings.supabase_jwt_secret
-    else:
+        algorithms = _SYMMETRIC_ALGORITHMS
+    elif algorithm in _ASYMMETRIC_ALGORITHMS:
         key = _jwks_client().get_signing_key_from_jwt(token).key
+        algorithms = _ASYMMETRIC_ALGORITHMS
+    else:
+        raise jwt.InvalidAlgorithmError(f"Unsupported token algorithm: {algorithm!r}.")
 
-    return jwt.decode(token, key, algorithms=[algorithm], audience="authenticated")
+    # Without an explicit require list a validly-signed token that simply omits
+    # `exp` never expires, and one missing `sub` reaches the caller and raises
+    # a KeyError (a 500) instead of a 401.
+    required = ["exp", "sub", "aud"]
+    issuer = f"{settings.supabase_url}/auth/v1" if settings.supabase_url else None
+    if issuer is not None:
+        required.append("iss")
+
+    return jwt.decode(
+        token,
+        key,
+        algorithms=algorithms,
+        audience="authenticated",
+        issuer=issuer,
+        options={"require": required},
+    )
 
 
 def get_current_user(
