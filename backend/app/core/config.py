@@ -18,10 +18,19 @@ class Settings(BaseSettings):
     # Defaults to production: a deploy that forgets to set ENVIRONMENT should
     # lose /docs and /openapi.json, not publish them.
     environment: str = "production"
+    # An origin is an exact string match, not a host: localhost, 127.0.0.1 and
+    # [::1] are three different origins even though they are one machine. Vite
+    # binds the IPv6 loopback on macOS and prints http://[::1]:5173/ as the URL
+    # to click, so that form has to be listed too or the browser's preflight
+    # comes back 400 "Disallowed CORS origin". All of these are loopback — they
+    # are unreachable from another host, so listing them costs nothing.
     cors_origins: list[str] = [
         "http://localhost:5173",  # Vite dev server
         "http://127.0.0.1:5173",  # Vite dev server via loopback IP
+        "http://[::1]:5173",  # Vite dev server via IPv6 loopback
         "http://localhost:4173",  # Vite preview (production build, PWA testing)
+        "http://127.0.0.1:4173",  # Vite preview via loopback IP
+        "http://[::1]:4173",  # Vite preview via IPv6 loopback
         "capacitor://localhost",  # iOS app scheme
         "https://localhost",  # Android app scheme (Capacitor defaults to https)
     ]

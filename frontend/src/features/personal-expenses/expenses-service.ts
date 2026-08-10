@@ -27,6 +27,7 @@ function toExpense(row: ExpenseRow): Expense {
     id: row.id,
     userId: row.user_id,
     groupId: row.group_id,
+    paidBy: row.paid_by,
     categoryId: row.category_id,
     description: row.description,
     amountMinor: row.amount_minor,
@@ -44,6 +45,9 @@ function expenseFromInput(userId: Id, id: Id, input: ExpenseInput, createdAt: st
     id,
     userId,
     groupId: null,
+    // A personal expense is paid by its owner — the database enforces exactly
+    // this (enforce_expense_payer), so the optimistic row can assert it.
+    paidBy: userId,
     categoryId: input.categoryId,
     description: input.description,
     amountMinor: input.amountMinor,
@@ -127,12 +131,50 @@ export async function listExpensesForMonth(month: MonthKey): Promise<Expense[]> 
       fetchExpensesForMonth(userId, month),
     )
   } catch (error) {
-    if (isOffline() || isNetworkError(error)) {
+    // "Offline" is a claim about the device, and it was being made for any
+    // failed request — a blocked CORS preflight or a server that never
+    // answered reads to fetch() exactly like a dropped connection. Telling
+    // someone with four bars that they are offline sends them to fix the
+    // wrong thing, so only say it when navigator actually says so.
+    if (isOffline()) {
       throw new Error('You’re offline and this month isn’t saved on this device yet.')
+    }
+    if (isNetworkError(error)) {
+      throw new Error('Couldn’t reach the server, and this month isn’t saved on this device yet.')
     }
     throw error
   }
   return withPendingOps(userId, month, expenses)
+}
+
+/**
+ * Personal expenses across a span of months, for the trend report. One query
+ * instead of one per month: a 12-month view would otherwise be twelve round
+ * trips, and the report is a page people scrub back and forth on.
+ *
+ * Pending offline ops are not replayed over this — the trend is a
+ * look-back at settled history, and a queued change to last March would
+ * make the chart disagree with the month view it came from.
+ */
+export async function listExpensesInRange(
+  fromMonth: MonthKey,
+  toMonth: MonthKey,
+): Promise<Expense[]> {
+  const userId = requireUserId()
+  const from = monthStart(fromMonth)
+  const to = nextMonthStart(toMonth)
+  return cachedFetch(cacheKeys.expensesRange(userId, from, to), async () => {
+    const { data, error } = await getSupabase()
+      .from('expenses')
+      .select('*')
+      .eq('user_id', userId)
+      .is('group_id', null)
+      .gte('date', from)
+      .lt('date', to)
+      .order('date', { ascending: false })
+    if (error) throwFriendly('load expenses', error)
+    return data.map(toExpense)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -184,14 +226,16 @@ async function insertExpenseRow(userId: Id, id: Id, input: ExpenseInput): Promis
 /** `id` is provided by the caller so optimistic inserts keep a stable key. */
 export async function createExpense(id: Id, input: ExpenseInput): Promise<Expense> {
   const userId = requireUserId()
-  if (!isOffline()) {
-    try {
-      const saved = await insertExpenseRow(userId, id, input)
-      await patchMonthCaches(userId, id, saved)
-      return saved
-    } catch (error) {
-      if (!isNetworkError(error)) throwFriendly('save the expense', error as PostgrestError)
-    }
+  // Always attempted, never skipped on the strength of navigator.onLine. A
+  // write that queues because of a wrong hint is a write the user watches not
+  // happen; a write that fails for real falls through to the outbox anyway,
+  // so trying first costs nothing but a round trip.
+  try {
+    const saved = await insertExpenseRow(userId, id, input)
+    await patchMonthCaches(userId, id, saved)
+    return saved
+  } catch (error) {
+    if (!isNetworkError(error)) throwFriendly('save the expense', error as PostgrestError)
   }
   await enqueueOp(userId, { kind: 'expense.create', entityId: id, input })
   return expenseFromInput(userId, id, input, new Date().toISOString())
@@ -199,29 +243,27 @@ export async function createExpense(id: Id, input: ExpenseInput): Promise<Expens
 
 export async function updateExpense(id: Id, input: ExpenseInput): Promise<Expense> {
   const userId = requireUserId()
-  if (!isOffline()) {
-    try {
-      const { data, error } = await getSupabase()
-        .from('expenses')
-        .update({
-          category_id: input.categoryId,
-          description: input.description,
-          amount_minor: input.amountMinor,
-          currency: input.currency,
-          date: input.date,
-          kind: input.kind,
-          notes: input.notes,
-        })
-        .eq('id', id)
-        .select()
-        .single()
-      if (error) throw error
-      const saved = toExpense(data)
-      await patchMonthCaches(userId, id, saved)
-      return saved
-    } catch (error) {
-      if (!isNetworkError(error)) throwFriendly('update the expense', error as PostgrestError)
-    }
+  try {
+    const { data, error } = await getSupabase()
+      .from('expenses')
+      .update({
+        category_id: input.categoryId,
+        description: input.description,
+        amount_minor: input.amountMinor,
+        currency: input.currency,
+        date: input.date,
+        kind: input.kind,
+        notes: input.notes,
+      })
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) throw error
+    const saved = toExpense(data)
+    await patchMonthCaches(userId, id, saved)
+    return saved
+  } catch (error) {
+    if (!isNetworkError(error)) throwFriendly('update the expense', error as PostgrestError)
   }
   await enqueueOp(userId, { kind: 'expense.update', entityId: id, input })
   const cached = await readCache<Expense[]>(
@@ -234,15 +276,13 @@ export async function updateExpense(id: Id, input: ExpenseInput): Promise<Expens
 
 export async function deleteExpense(id: Id): Promise<void> {
   const userId = requireUserId()
-  if (!isOffline()) {
-    try {
-      const { error } = await getSupabase().from('expenses').delete().eq('id', id)
-      if (error) throw error
-      await patchMonthCaches(userId, id, null)
-      return
-    } catch (error) {
-      if (!isNetworkError(error)) throwFriendly('delete the expense', error as PostgrestError)
-    }
+  try {
+    const { error } = await getSupabase().from('expenses').delete().eq('id', id)
+    if (error) throw error
+    await patchMonthCaches(userId, id, null)
+    return
+  } catch (error) {
+    if (!isNetworkError(error)) throwFriendly('delete the expense', error as PostgrestError)
   }
   await enqueueOp(userId, { kind: 'expense.delete', entityId: id })
 }

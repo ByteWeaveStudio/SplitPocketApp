@@ -5,8 +5,11 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Track personal spending and split shared expenses with friends." />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8f8f5" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#04060a" />
+    <!-- Light, matching the app's default. Not split by prefers-color-scheme:
+         the app no longer follows the OS, so an OS-driven tag would paint the
+         browser chrome dark around a light app until ThemeColorSync corrects
+         it on mount. -->
+    <meta name="theme-color" content="#f8f8f5" />
     <title>SplitPocket</title>
   </head>
   <body>

@@ -11,6 +11,7 @@ import { SignUpPage } from '@/features/auth/pages/SignUpPage'
 import { DashboardPage } from '@/features/dashboard/pages/DashboardPage'
 import { GroupDetailPage } from '@/features/groups/pages/GroupDetailPage'
 import { GroupsPage } from '@/features/groups/pages/GroupsPage'
+import { JoinGroupPage } from '@/features/groups/pages/JoinGroupPage'
 import { ExpensesPage } from '@/features/personal-expenses/pages/ExpensesPage'
 import { ReportsPage } from '@/features/reports/pages/ReportsPage'
 import { SettingsPage } from '@/features/settings/pages/SettingsPage'
@@ -56,6 +57,10 @@ export const router = createBrowserRouter([
       </RedirectIfSignedIn>
     ),
   },
+  // Outside RequireAuth on purpose: an invite link is usually opened by
+  // someone who doesn't have an account yet, and the page handles that case
+  // itself rather than bouncing them to a sign-in screen with no context.
+  { path: '/join/:token', element: <JoinGroupPage /> },
   { path: '/auth/reset-password', element: <ResetPasswordPage /> },
   { path: '/auth/callback', element: <AuthCallbackPage /> },
   { path: '*', element: <NotFoundPage /> },

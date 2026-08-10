@@ -119,13 +119,27 @@ describe('flushOutbox', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it('does nothing while offline', async () => {
+  it('still attempts a replay when the browser claims to be offline', async () => {
+    // The claim is a hint, not a veto. Skipping the attempt is what strands a
+    // queue behind a stuck navigator.onLine: nothing would ever run to
+    // discover the flag was wrong.
     await enqueueOp(USER, { kind: 'expense.create', entityId: 'e1', input: expenseInput('One') })
-    vi.stubGlobal('navigator', { onLine: false })
+    useNetworkStore.getState().setOnline(false)
 
     await flushOutbox()
 
-    expect(replayExpenseOp).not.toHaveBeenCalled()
+    expect(replayExpenseOp).toHaveBeenCalledTimes(1)
+    expect(await listOps(USER)).toHaveLength(0)
+  })
+
+  it('leaves the queue intact when the replay hits a network error', async () => {
+    // The genuinely-offline case: one failed request, nothing lost.
+    await enqueueOp(USER, { kind: 'expense.create', entityId: 'e1', input: expenseInput('One') })
+    useNetworkStore.getState().setOnline(false)
+    vi.mocked(replayExpenseOp).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    await flushOutbox()
+
     expect(await listOps(USER)).toHaveLength(1)
   })
 

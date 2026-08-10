@@ -57,6 +57,11 @@
    and green-tinted charcoal (dark). Money amounts render in Geist Mono with
    tabular figures; positive/negative are the balance colors used app-wide. */
 :root {
+    /* Native widgets — the date picker, scrollbars, autofill — read this, not
+       our tokens. Without it they follow the OS, so a dark-OS user would get a
+       dark date picker inside the light app. Declared per theme class rather
+       than as `light dark`, because the app no longer follows the OS at all. */
+    color-scheme: light;
     --background: oklch(0.982 0.004 95);
     --foreground: oklch(0.18 0.012 155);
     --card: oklch(1 0 0);
@@ -77,11 +82,18 @@
     --border: oklch(0.91 0.008 120);
     --input: oklch(0.91 0.008 120);
     --ring: oklch(0.6 0.1 165);
-    --chart-1: oklch(0.55 0.12 165);
-    --chart-2: oklch(0.6 0.1 230);
-    --chart-3: oklch(0.75 0.13 80);
-    --chart-4: oklch(0.55 0.12 300);
-    --chart-5: oklch(0.62 0.15 20);
+    /* Categorical series, assigned in this fixed order and never cycled.
+       Re-stepped for v2 (the first release to actually draw charts): the
+       previous 1/2 pair sat at ΔE 12.7 in OKLab under normal vision, below the
+       15 floor, so two adjacent series read as the same colour. These steps
+       pass the lightness band, chroma floor, CVD separation, normal-vision
+       floor and 3:1 contrast against --card in both modes. Re-run
+       scripts/validate_palette.js from the dataviz skill before changing one. */
+    --chart-1: oklch(0.55 0.13 165);
+    --chart-2: oklch(0.52 0.15 300);
+    --chart-3: oklch(0.62 0.13 80);
+    --chart-4: oklch(0.55 0.13 245);
+    --chart-5: oklch(0.55 0.18 25);
     --radius: 0.75rem;
     --sidebar: oklch(0.968 0.005 110);
     --sidebar-foreground: oklch(0.18 0.012 155);
@@ -94,6 +106,7 @@
 }
 
 .dark {
+    color-scheme: dark;
     --background: oklch(0.12 0.012 255);
     --foreground: oklch(0.95 0.006 255);
     --card: oklch(0.17 0.014 255);
@@ -114,11 +127,13 @@
     --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 16%);
     --ring: oklch(0.6 0.1 165);
-    --chart-1: oklch(0.72 0.13 165);
-    --chart-2: oklch(0.68 0.11 230);
-    --chart-3: oklch(0.8 0.13 80);
-    --chart-4: oklch(0.65 0.12 300);
-    --chart-5: oklch(0.7 0.15 20);
+    /* Chosen against the dark surface, not lightened from the light steps:
+       the dark band is L 0.48–0.67, and the old values sat above it. */
+    --chart-1: oklch(0.66 0.13 165);
+    --chart-2: oklch(0.62 0.15 300);
+    --chart-3: oklch(0.66 0.13 80);
+    --chart-4: oklch(0.63 0.13 245);
+    --chart-5: oklch(0.62 0.18 25);
     --sidebar: oklch(0.145 0.013 255);
     --sidebar-foreground: oklch(0.95 0.006 255);
     --sidebar-primary: oklch(0.78 0.14 163);
@@ -194,4 +209,18 @@
   transform-origin: left;
   animation: bar-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(var(--stagger, 0) * 40ms);
+}
+
+/* Trend columns grow from the baseline, which is where they are measured
+   from — scaling a column from its centre would read as it appearing rather
+   than accumulating. */
+@keyframes bar-rise {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@utility bar-rise {
+  transform-origin: bottom;
+  animation: bar-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

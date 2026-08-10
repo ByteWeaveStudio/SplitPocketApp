@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-import { useExpenseSheetStore } from '@/features/personal-expenses/expense-sheet-store'
+import { useComposerStore } from '@/features/expense-composer/composer-store'
 
 /** Pressing "n" anywhere outside a form field starts a new expense. */
 export function useNewExpenseShortcut() {
@@ -12,7 +12,7 @@ export function useNewExpenseShortcut() {
         return
       }
       event.preventDefault()
-      useExpenseSheetStore.getState().openNew()
+      useComposerStore.getState().openNew()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)

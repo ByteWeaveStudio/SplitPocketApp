@@ -50,8 +50,13 @@ export async function listCategories(): Promise<Category[]> {
   try {
     categories = await cachedFetch(cacheKeys.categories(userId), fetchCategories)
   } catch (error) {
-    if (isOffline() || isNetworkError(error)) {
+    // Same distinction as listExpensesForMonth: a failed request is not
+    // evidence that the device is offline.
+    if (isOffline()) {
       throw new Error('You’re offline and categories aren’t saved on this device yet.')
+    }
+    if (isNetworkError(error)) {
+      throw new Error('Couldn’t reach the server, and categories aren’t saved on this device yet.')
     }
     throw error
   }
@@ -82,12 +87,11 @@ async function insertCategoryRow(userId: Id, id: Id, name: string, icon: string)
 export async function createCategory(name: string, icon = 'tag'): Promise<Category> {
   const userId = requireUserId()
   const id = crypto.randomUUID()
-  if (!isOffline()) {
-    try {
-      return await insertCategoryRow(userId, id, name, icon)
-    } catch (error) {
-      if (!isNetworkError(error)) throwFriendly('create the category', error as PostgrestError)
-    }
+  // Attempted regardless of the offline hint — same reasoning as createExpense.
+  try {
+    return await insertCategoryRow(userId, id, name, icon)
+  } catch (error) {
+    if (!isNetworkError(error)) throwFriendly('create the category', error as PostgrestError)
   }
   // Mirror the server's case-insensitive uniqueness so the queued create
   // can't collide (and take dependent expenses down with it) on replay.

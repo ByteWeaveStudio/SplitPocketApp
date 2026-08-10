@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { signOut } from '@/features/auth/auth-service'
 import { CURRENCIES } from '@/lib/currencies'
 import { useAuthStore } from '@/stores/auth-store'
@@ -38,7 +39,7 @@ function initialsOf(name: string): string {
 }
 
 export function SettingsPage() {
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
   const currency = useSettingsStore((state) => state.currency)
   const currencySource = useSettingsStore((state) => state.currencySource)
   const setCurrency = useSettingsStore((state) => state.setCurrency)
@@ -72,18 +73,17 @@ export function SettingsPage() {
             <CardDescription>How SplitPocket looks on this device.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex max-w-xs flex-col gap-2">
-              <Label htmlFor="theme">Theme</Label>
-              <Select value={theme ?? 'system'} onValueChange={setTheme}>
-                <SelectTrigger id="theme">
-                  <SelectValue placeholder="Select a theme" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="light">Light</SelectItem>
-                  <SelectItem value="dark">Dark</SelectItem>
-                  <SelectItem value="system">System</SelectItem>
-                </SelectContent>
-              </Select>
+            {/* Two states, so a switch rather than a two-item dropdown —
+                same single tap as the header toggle it mirrors. */}
+            <div className="flex max-w-xs items-center justify-between gap-4">
+              <Label htmlFor="dark-mode" className="font-normal">
+                Dark mode
+              </Label>
+              <Switch
+                id="dark-mode"
+                checked={resolvedTheme === 'dark'}
+                onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+              />
             </div>
           </CardContent>
         </Card>

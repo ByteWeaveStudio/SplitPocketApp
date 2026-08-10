@@ -1,5 +1,5 @@
 import { env } from '@/lib/env'
-import { OFFLINE_MESSAGE, UNREACHABLE_MESSAGE, isOffline } from '@/services/offline/net'
+import { OFFLINE_MESSAGE, UNREACHABLE_MESSAGE, isOffline, markOnline } from '@/services/offline/net'
 import { getSupabase, isSupabaseConfigured } from '@/services/supabase'
 
 export class ApiError extends Error {
@@ -29,7 +29,6 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (options.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
-  if (isOffline()) throw new Error(OFFLINE_MESSAGE)
   const token = await getAccessToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
@@ -37,11 +36,17 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const url = `${env.VITE_API_URL.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
   let response: Response
   try {
+    // Attempted even when the browser claims to be offline. That claim is a
+    // hint (see net.ts) and refusing here on the strength of it is what turns
+    // one bad flag into an app that cannot recover: the request that would
+    // have disproved it never gets made.
     response = await fetch(url, { ...options, headers })
   } catch {
     // fetch only rejects when the request never reached the server.
     throw new Error(isOffline() ? OFFLINE_MESSAGE : UNREACHABLE_MESSAGE)
   }
+  // Any response at all — including a 401 — proves the network works.
+  markOnline()
 
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null)

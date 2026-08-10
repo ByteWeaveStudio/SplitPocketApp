@@ -11,7 +11,7 @@ import { ExpenseFilters } from '@/features/personal-expenses/components/expense-
 import { ExpenseList } from '@/features/personal-expenses/components/expense-list'
 import { MonthSwitcher } from '@/features/personal-expenses/components/month-switcher'
 import { MonthSummary } from '@/features/personal-expenses/components/month-summary'
-import { useExpenseSheetStore } from '@/features/personal-expenses/expense-sheet-store'
+import { useComposerStore } from '@/features/expense-composer/composer-store'
 import {
   filterExpenses,
   summarizeByCurrency,
@@ -33,7 +33,7 @@ export function ExpensesPage() {
   const setCategoryFilter = useExpensesStore((state) => state.setCategoryFilter)
   const setKindFilter = useExpensesStore((state) => state.setKindFilter)
 
-  const openNew = useExpenseSheetStore((state) => state.openNew)
+  const openNew = useComposerStore((state) => state.openNew)
   const categories = useCategoriesStore((state) => state.categories)
   const loadCategories = useCategoriesStore((state) => state.load)
 
@@ -64,7 +64,7 @@ export function ExpensesPage() {
         title="Expenses"
         description="Everything you spend, in one list."
         action={
-          <Button onClick={openNew}>
+          <Button onClick={() => openNew()}>
             <Plus className="size-4" aria-hidden />
             Add expense
           </Button>
@@ -93,7 +93,7 @@ export function ExpensesPage() {
           title="No expenses this month"
           description={`Nothing recorded for ${monthKeyLabel(month)}. Anything you add lands here.`}
           action={
-            <Button variant="outline" onClick={openNew}>
+            <Button variant="outline" onClick={() => openNew()}>
               Add expense
             </Button>
           }

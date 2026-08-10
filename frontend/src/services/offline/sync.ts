@@ -6,7 +6,7 @@ import { useDashboardStore } from '@/features/dashboard/dashboard-store'
 import { replayExpenseOp } from '@/features/personal-expenses/expenses-service'
 import { useExpensesStore } from '@/features/personal-expenses/expenses-store'
 import { clearOfflineData } from '@/services/offline/cache'
-import { isNetworkError, isOffline } from '@/services/offline/net'
+import { isNetworkError } from '@/services/offline/net'
 import { listOps, refreshPendingState, removeOp } from '@/services/offline/outbox'
 import type { OutboxEntry } from '@/services/offline/outbox'
 import { useAuthStore } from '@/stores/auth-store'
@@ -56,7 +56,11 @@ function refreshStores(hadCategoryOps: boolean): void {
  */
 export async function flushOutbox(): Promise<void> {
   const user = useAuthStore.getState().user
-  if (!user || isOffline() || flushing) return
+  // Not gated on isOffline(): the replay below stops on the first network
+  // error anyway, so attempting costs one failed request when genuinely
+  // offline — and it is the only thing that can clear a stuck offline flag,
+  // which would otherwise strand the queue forever.
+  if (!user || flushing) return
   const ops = await listOps(user.id)
   if (ops.length === 0) return
 
@@ -117,8 +121,10 @@ export function initSync(): () => void {
   handleChange()
 
   const retry = window.setInterval(() => {
-    const { online, pendingCount, syncing } = useNetworkStore.getState()
-    if (online && pendingCount > 0 && !syncing) void flushOutbox()
+    const { pendingCount, syncing } = useNetworkStore.getState()
+    // Retried regardless of the online flag, for the same reason flushOutbox
+    // no longer checks it: a successful replay is what proves we are back.
+    if (pendingCount > 0 && !syncing) void flushOutbox()
   }, RETRY_INTERVAL_MS)
 
   return () => {

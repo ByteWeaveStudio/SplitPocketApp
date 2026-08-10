@@ -1,17 +1,42 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { isNetworkError, isOffline, OFFLINE_MESSAGE, UNREACHABLE_MESSAGE } from '@/services/offline/net'
+import {
+  isNetworkError,
+  isOffline,
+  markOnline,
+  OFFLINE_MESSAGE,
+  UNREACHABLE_MESSAGE,
+} from '@/services/offline/net'
+import { useNetworkStore } from '@/stores/network-store'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  useNetworkStore.getState().setOnline(true)
 })
 
 describe('isOffline', () => {
-  it('is true only when the browser reports offline', () => {
-    vi.stubGlobal('navigator', { onLine: false })
+  // Reads the network store rather than navigator directly. initSync feeds
+  // the store from navigator's events; markOnline corrects it from evidence.
+  it('follows the tracked connectivity state', () => {
+    useNetworkStore.getState().setOnline(false)
     expect(isOffline()).toBe(true)
-    vi.stubGlobal('navigator', { onLine: true })
+    useNetworkStore.getState().setOnline(true)
     expect(isOffline()).toBe(false)
+  })
+})
+
+describe('markOnline', () => {
+  it('clears a false offline state, so one good request is the way back', () => {
+    useNetworkStore.getState().setOnline(false)
+    markOnline()
+    expect(isOffline()).toBe(false)
+  })
+
+  it('is a no-op when already online', () => {
+    const before = useNetworkStore.getState()
+    markOnline()
+    expect(useNetworkStore.getState().online).toBe(true)
+    expect(useNetworkStore.getState()).toBe(before)
   })
 })
 

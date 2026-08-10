@@ -2,7 +2,12 @@
 
 import pytest
 
-from app.services.splits import ParticipantShare, compute_splits
+from app.services.splits import (
+    LineItem,
+    ParticipantShare,
+    compute_itemized_splits,
+    compute_splits,
+)
 
 A, B, C = "user-a", "user-b", "user-c"
 
@@ -182,4 +187,141 @@ class TestValidation:
 
     def test_unknown_method_rejected(self):
         with pytest.raises(ValueError, match="Unknown split method"):
-            compute_splits("shares", 100, [ParticipantShare(A)])
+            compute_splits("vibes", 100, [ParticipantShare(A)])
+
+    def test_itemized_is_not_reachable_through_compute_splits(self):
+        # Itemized takes line items, not participants, so it has its own entry
+        # point; asking for it here is a caller bug, not a user error.
+        with pytest.raises(ValueError, match="Unknown split method"):
+            compute_splits("itemized", 100, [ParticipantShare(A)])
+
+
+class TestShares:
+    def test_two_to_one(self):
+        splits = compute_splits(
+            "shares",
+            9_000,
+            [ParticipantShare(A, share_units=2), ParticipantShare(B, share_units=1)],
+        )
+        assert owed(splits) == {A: 6_000, B: 3_000}
+
+    def test_equal_shares_match_an_equal_split(self):
+        shares = compute_splits(
+            "shares", 100, [ParticipantShare(uid, share_units=1) for uid in (A, B, C)]
+        )
+        equal = compute_splits("equal", 100, [ParticipantShare(uid) for uid in (A, B, C)])
+        assert sum(owed(shares).values()) == sum(owed(equal).values()) == 100
+
+    def test_units_are_recorded(self):
+        splits = compute_splits(
+            "shares",
+            300,
+            [ParticipantShare(A, share_units=3), ParticipantShare(B, share_units=1)],
+        )
+        assert {s.user_id: s.share_units for s in splits} == {A: 3, B: 1}
+        assert all(s.share_basis_points is None for s in splits)
+
+    @pytest.mark.parametrize("amount", [1, 7, 99, 12_345, 999_999_999])
+    def test_always_reconciles(self, amount):
+        splits = compute_splits(
+            "shares",
+            amount,
+            [
+                ParticipantShare(A, share_units=3),
+                ParticipantShare(B, share_units=1),
+                ParticipantShare(C, share_units=1),
+            ],
+        )
+        assert sum(owed(splits).values()) == amount
+
+    def test_leftover_goes_to_the_largest_share(self):
+        # 3 : 1 : 1 of 100 floors to 60 + 20 + 20 = 100 exactly; 3 : 1 : 1 of
+        # 101 leaves one unit, which belongs with the biggest share.
+        splits = compute_splits(
+            "shares",
+            101,
+            [
+                ParticipantShare(A, share_units=3),
+                ParticipantShare(B, share_units=1),
+                ParticipantShare(C, share_units=1),
+            ],
+        )
+        assert owed(splits) == {A: 61, B: 20, C: 20}
+
+    def test_missing_share_rejected(self):
+        with pytest.raises(ValueError, match="needs a share"):
+            compute_splits(
+                "shares", 100, [ParticipantShare(A, share_units=1), ParticipantShare(B)]
+            )
+
+    def test_zero_share_rejected(self):
+        # A zero-weight participant is someone who should not be in the split
+        # at all -- silently owing nothing hides the mistake.
+        with pytest.raises(ValueError, match="at least 1"):
+            compute_splits(
+                "shares",
+                100,
+                [ParticipantShare(A, share_units=0), ParticipantShare(B, share_units=1)],
+            )
+
+
+class TestItemized:
+    def test_each_item_splits_among_its_own_participants(self):
+        # A and B share a 1000 starter; only A had the 500 dessert.
+        splits = compute_itemized_splits(
+            1_500,
+            [
+                LineItem("Starter", 1_000, (A, B)),
+                LineItem("Dessert", 500, (A,)),
+            ],
+        )
+        assert owed(splits) == {A: 1_000, B: 500}
+
+    def test_participants_are_the_union_of_the_items(self):
+        splits = compute_itemized_splits(
+            300, [LineItem("Taxi", 200, (A, B)), LineItem("Tip", 100, (C,))]
+        )
+        assert set(owed(splits)) == {A, B, C}
+
+    def test_items_must_add_up_to_the_total(self):
+        with pytest.raises(ValueError, match="add up to the total"):
+            compute_itemized_splits(1_000, [LineItem("Starter", 999, (A, B))])
+
+    def test_empty_bill_rejected(self):
+        with pytest.raises(ValueError, match="at least one item"):
+            compute_itemized_splits(0, [])
+
+    def test_item_without_participants_rejected(self):
+        with pytest.raises(ValueError, match="who shared"):
+            compute_itemized_splits(100, [LineItem("Mystery dish", 100, ())])
+
+    def test_duplicate_participant_in_one_item_rejected(self):
+        with pytest.raises(ValueError, match="only once"):
+            compute_itemized_splits(100, [LineItem("Pizza", 100, (A, A))])
+
+    def test_rounding_rotates_between_items(self):
+        # Three 100-unit items split two ways each: 50/50 leaves no remainder,
+        # so make them odd. Each item leaves one unit, and rotating means A
+        # does not absorb all three.
+        splits = compute_itemized_splits(
+            303,
+            [
+                LineItem("One", 101, (A, B)),
+                LineItem("Two", 101, (A, B)),
+                LineItem("Three", 101, (A, B)),
+            ],
+        )
+        assert sum(owed(splits).values()) == 303
+        assert owed(splits) == {A: 152, B: 151}
+
+    @pytest.mark.parametrize("amount", [3, 101, 9_999, 1_000_003])
+    def test_always_reconciles(self, amount):
+        half = amount // 2
+        splits = compute_itemized_splits(
+            amount,
+            [
+                LineItem("Shared", half, (A, B, C)),
+                LineItem("Rest", amount - half, (A, B)),
+            ],
+        )
+        assert sum(owed(splits).values()) == amount

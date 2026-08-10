@@ -37,10 +37,15 @@ export type ExpenseKind = 'expense' | 'income'
 
 export interface Expense {
   id: Id
-  /** Who created the record (and paid, unless splits say otherwise). */
+  /** Who created the record. */
   userId: Id
   /** Null for personal expenses; set when the expense belongs to a group. */
   groupId: Id | null
+  /**
+   * Who actually paid — the person the group owes. Equals `userId` for
+   * personal expenses and for anything recorded by its own payer.
+   */
+  paidBy: Id
   categoryId: Id | null
   description: string
   amountMinor: number
@@ -53,7 +58,7 @@ export interface Expense {
   updatedAt: ISODateString
 }
 
-export type SplitMethod = 'equal' | 'custom' | 'percentage'
+export type SplitMethod = 'equal' | 'custom' | 'percentage' | 'shares' | 'itemized'
 
 export interface ExpenseSplit {
   id: Id
@@ -63,7 +68,18 @@ export interface ExpenseSplit {
   owedMinor: number
   /** Basis points (1/100 of a percent) when method is "percentage". */
   shareBasisPoints: number | null
+  /** Weight when method is "shares": 2 units is twice the share of 1. */
+  shareUnits: number | null
   method: SplitMethod
+}
+
+/** One line of an itemized bill; splits are derived from these, not stored twice. */
+export interface ExpenseItem {
+  id: Id
+  description: string
+  amountMinor: number
+  position: number
+  participantIds: Id[]
 }
 
 export interface Group {

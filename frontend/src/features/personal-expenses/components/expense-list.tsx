@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { categoryIcon } from '@/features/categories/category-icons'
-import { useExpenseSheetStore } from '@/features/personal-expenses/expense-sheet-store'
+import { useComposerStore } from '@/features/expense-composer/composer-store'
 import { useExpensesStore } from '@/features/personal-expenses/expenses-store'
 import { dayLabel } from '@/lib/dates'
 import { formatMoney } from '@/lib/format'
@@ -103,7 +103,7 @@ function ExpenseRow({
   category: Category | undefined
   onDelete: () => void
 }) {
-  const openEdit = useExpenseSheetStore((state) => state.openEdit)
+  const openEdit = useComposerStore((state) => state.openEdit)
   const pendingSync = useNetworkStore((state) => state.pendingIds.has(expense.id))
   const isIncome = expense.kind === 'income'
   const Icon = categoryIcon(category?.icon)

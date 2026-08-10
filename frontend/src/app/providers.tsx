@@ -10,6 +10,7 @@ import { useDashboardStore } from '@/features/dashboard/dashboard-store'
 import { useGroupDetailStore } from '@/features/groups/group-detail-store'
 import { useGroupsStore } from '@/features/groups/groups-store'
 import { useExpensesStore } from '@/features/personal-expenses/expenses-store'
+import { DEFAULT_THEME } from '@/lib/theme'
 import { initSync, onSignedIn, onSignedOut } from '@/services/offline/sync'
 import { getSupabase, isSupabaseConfigured } from '@/services/supabase'
 import { useAuthStore } from '@/stores/auth-store'
@@ -83,7 +84,14 @@ function SyncListener() {
 
 export function Providers() {
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    // Light unless the user says otherwise, and the OS preference is not
+    // consulted — see lib/theme.ts.
+    <ThemeProvider
+      attribute="class"
+      defaultTheme={DEFAULT_THEME}
+      enableSystem={false}
+      disableTransitionOnChange
+    >
       <ThemeColorSync />
       <AuthListener />
       <SyncListener />

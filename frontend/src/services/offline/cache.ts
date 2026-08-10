@@ -1,5 +1,5 @@
 import { CACHE_STORE, OUTBOX_STORE, idbRequest } from '@/services/offline/db'
-import { isNetworkError, isOffline } from '@/services/offline/net'
+import { isNetworkError, isOffline, markOnline } from '@/services/offline/net'
 import type { Id } from '@/types'
 
 /**
@@ -9,6 +9,11 @@ import type { Id } from '@/types'
  */
 export const cacheKeys = {
   expensesMonth: (userId: Id, month: string) => `expenses:${userId}:${month}`,
+  // Deliberately not under the `expenses:` prefix: patchMonthCaches walks that
+  // prefix expecting one month per entry, and a multi-month range would be
+  // rewritten as if it were one.
+  expensesRange: (userId: Id, from: string, to: string) =>
+    `expense-range:${userId}:${from}:${to}`,
   categories: (userId: Id) => `categories:${userId}`,
   groups: (userId: Id) => `groups:${userId}`,
   myBalances: (userId: Id) => `my-balances:${userId}`,
@@ -53,6 +58,7 @@ export async function listCacheKeys(prefix: string): Promise<string[]> {
 export async function cachedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   try {
     const value = await fetcher()
+    markOnline()
     await writeCache(key, value)
     return value
   } catch (error) {

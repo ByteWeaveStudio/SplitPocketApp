@@ -89,6 +89,7 @@ export const useExpensesStore = create<ExpensesState>()((set, get) => ({
       id,
       userId: useAuthStore.getState().user?.id ?? '',
       groupId: null,
+      paidBy: useAuthStore.getState().user?.id ?? '',
       categoryId: input.categoryId,
       description: input.description,
       amountMinor: input.amountMinor,

@@ -6,8 +6,8 @@ import { BrandMark } from '@/components/brand-mark'
 import { ConnectivityBanner } from '@/components/connectivity-banner'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
-import { ExpenseFormSheet } from '@/features/personal-expenses/components/expense-form-sheet'
-import { useExpenseSheetStore } from '@/features/personal-expenses/expense-sheet-store'
+import { ExpenseComposer } from '@/features/expense-composer/components/expense-composer'
+import { useComposerStore } from '@/features/expense-composer/composer-store'
 import { useNewExpenseShortcut } from '@/hooks/use-new-expense-shortcut'
 import { cn } from '@/lib/utils'
 import { isSupabaseConfigured } from '@/services/supabase'
@@ -19,10 +19,13 @@ interface NavItem {
   end?: boolean
 }
 
+// Groups before Expenses: splitting is what the app is for, and personal
+// tracking is what supports it. The order of these two is the clearest
+// statement the navigation makes about which is which.
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Home', icon: Home, end: true },
-  { to: '/expenses', label: 'Expenses', icon: Wallet },
   { to: '/groups', label: 'Groups', icon: Users },
+  { to: '/expenses', label: 'Expenses', icon: Wallet },
   { to: '/reports', label: 'Reports', icon: TrendingUp },
 ]
 
@@ -50,20 +53,20 @@ export function AppLayout() {
         </main>
       </div>
       <MobileTabBar />
-      <ExpenseFormSheet />
+      <ExpenseComposer />
     </div>
   )
 }
 
 function Sidebar() {
-  const openNewExpense = useExpenseSheetStore((state) => state.openNew)
+  const openNewExpense = useComposerStore((state) => state.openNew)
   return (
     <aside className="sticky top-0 hidden h-svh flex-col border-r bg-sidebar md:flex">
       <div className="px-5 pt-6">
         <BrandMark withWordmark />
       </div>
       <div className="px-4 pt-6">
-        <Button className="w-full justify-start gap-2" onClick={openNewExpense}>
+        <Button className="w-full justify-start gap-2" onClick={() => openNewExpense()}>
           <Plus className="size-4" aria-hidden />
           Add expense
         </Button>
@@ -122,8 +125,8 @@ function MobileHeader() {
 }
 
 function MobileTabBar() {
-  const openNewExpense = useExpenseSheetStore((state) => state.openNew)
-  const [homeTab, expensesTab, groupsTab, reportsTab] = NAV_ITEMS
+  const openNewExpense = useComposerStore((state) => state.openNew)
+  const [homeTab, groupsTab, expensesTab, reportsTab] = NAV_ITEMS
   return (
     <nav
       aria-label="Primary"
@@ -131,18 +134,18 @@ function MobileTabBar() {
     >
       <div className="grid grid-cols-5 items-center px-2 py-2">
         <TabLink item={homeTab} />
-        <TabLink item={expensesTab} />
+        <TabLink item={groupsTab} />
         <div className="flex justify-center">
           <Button
             size="icon"
             aria-label="Add expense"
             className="-mt-7 size-14 rounded-full shadow-lg"
-            onClick={openNewExpense}
+            onClick={() => openNewExpense()}
           >
             <Plus className="size-6" aria-hidden />
           </Button>
         </div>
-        <TabLink item={groupsTab} />
+        <TabLink item={expensesTab} />
         <TabLink item={reportsTab} />
       </div>
     </nav>

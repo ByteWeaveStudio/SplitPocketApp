@@ -1,16 +1,20 @@
 import type { PostgrestError } from '@supabase/supabase-js'
 
 import type {
+  ActivityPage,
+  ExpenseComment,
   GroupBalances,
   GroupExpense,
   GroupExpenseInput,
+  GroupInvite,
   GroupSettlement,
   GroupWithMembers,
+  InvitePreview,
   MyGroupBalance,
+  SplitPreset,
 } from '@/features/groups/types'
 import { api, ApiError } from '@/services/api'
 import { cacheKeys, cachedFetch } from '@/services/offline/cache'
-import { OFFLINE_MESSAGE, isNetworkError, isOffline } from '@/services/offline/net'
 import { getSupabase } from '@/services/supabase'
 import { useAuthStore } from '@/stores/auth-store'
 import type { CurrencyCode, ExpenseKind, Id, SplitMethod, Tables } from '@/types'
@@ -48,6 +52,10 @@ async function call<T>(promise: Promise<T>, fallback: string): Promise<T> {
   }
 }
 
+function post<T>(path: string, body: unknown, fallback: string): Promise<T> {
+  return call(api<T>(path, { method: 'POST', body: JSON.stringify(body) }), fallback)
+}
+
 function throwFriendly(action: string, error: PostgrestError): never {
   throw new Error(`Couldn't ${action}. ${error.message}`)
 }
@@ -68,10 +76,11 @@ export function listGroups(): Promise<GroupWithMembers[]> {
 }
 
 async function fetchGroups(): Promise<GroupWithMembers[]> {
+  // Archived groups are included: the Groups page can show them behind a
+  // toggle, and hiding them here would make "unarchive" unreachable.
   const { data, error } = await getSupabase()
     .from('groups')
     .select('*, group_members(user_id, role, joined_at, profiles(email, full_name, avatar_url))')
-    .is('archived_at', null)
     .order('created_at', { ascending: false })
   if (error) throwFriendly('load groups', error)
   return data.map((row) => ({
@@ -98,19 +107,37 @@ export function createGroup(input: {
   description: string | null
   currency: CurrencyCode
 }): Promise<GroupWithMembers> {
+  return post('/api/v1/groups', input, 'Couldn’t create the group.')
+}
+
+export function updateGroup(
+  groupId: Id,
+  input: { name?: string; description?: string | null; archived?: boolean },
+): Promise<GroupWithMembers> {
   return call(
-    api<GroupWithMembers>('/api/v1/groups', { method: 'POST', body: JSON.stringify(input) }),
-    'Couldn’t create the group.',
+    api<GroupWithMembers>(`/api/v1/groups/${groupId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+    'Couldn’t update the group.',
   )
 }
 
 export function addMemberByEmail(groupId: Id, email: string) {
-  return call(
-    api<GroupWithMembers['members'][number]>(`/api/v1/groups/${groupId}/members`, {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    }),
+  return post<GroupWithMembers['members'][number]>(
+    `/api/v1/groups/${groupId}/members`,
+    { email },
     'Couldn’t add that person.',
+  )
+}
+
+export function setMemberRole(groupId: Id, userId: Id, role: 'owner' | 'member') {
+  return call(
+    api<GroupWithMembers['members'][number]>(
+      `/api/v1/groups/${groupId}/members/${userId}`,
+      { method: 'PATCH', body: JSON.stringify({ role }) },
+    ),
+    'Couldn’t change that role.',
   )
 }
 
@@ -118,6 +145,98 @@ export function removeMember(groupId: Id, userId: Id): Promise<void> {
   return call(
     api<void>(`/api/v1/groups/${groupId}/members/${userId}`, { method: 'DELETE' }),
     'Couldn’t remove that member.',
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Invite links
+// ---------------------------------------------------------------------------
+
+export function createInvite(
+  groupId: Id,
+  input: { expiresInHours: number; maxUses: number | null },
+): Promise<GroupInvite> {
+  return post(`/api/v1/groups/${groupId}/invites`, input, 'Couldn’t create an invite link.')
+}
+
+export function listInvites(groupId: Id): Promise<GroupInvite[]> {
+  return call(
+    api<GroupInvite[]>(`/api/v1/groups/${groupId}/invites`),
+    'Couldn’t load invite links.',
+  )
+}
+
+export function revokeInvite(groupId: Id, inviteId: Id): Promise<void> {
+  return call(
+    api<void>(`/api/v1/groups/${groupId}/invites/${inviteId}`, { method: 'DELETE' }),
+    'Couldn’t revoke that link.',
+  )
+}
+
+// The token travels in the body, not the path: it is a bearer credential and
+// a path lands in every access log between here and the server.
+export function previewInvite(token: string): Promise<InvitePreview> {
+  return post('/api/v1/invites/preview', { token }, 'This invite link is no longer valid.')
+}
+
+export function acceptInvite(token: string): Promise<GroupWithMembers> {
+  return post('/api/v1/invites/accept', { token }, 'Couldn’t join that group.')
+}
+
+/** The link a user actually shares. */
+export function inviteUrl(token: string): string {
+  return `${window.location.origin}/join/${token}`
+}
+
+// ---------------------------------------------------------------------------
+// Activity & comments
+// ---------------------------------------------------------------------------
+
+export function listActivity(groupId: Id, before?: string): Promise<ActivityPage> {
+  const query = before ? `?before=${encodeURIComponent(before)}` : ''
+  return call(
+    api<ActivityPage>(`/api/v1/groups/${groupId}/activity${query}`),
+    'Couldn’t load the activity feed.',
+  )
+}
+
+export function listComments(expenseId: Id): Promise<ExpenseComment[]> {
+  return call(
+    api<ExpenseComment[]>(`/api/v1/expenses/${expenseId}/comments`),
+    'Couldn’t load comments.',
+  )
+}
+
+export function addComment(expenseId: Id, body: string): Promise<ExpenseComment> {
+  return post(`/api/v1/expenses/${expenseId}/comments`, { body }, 'Couldn’t post that comment.')
+}
+
+export function deleteComment(commentId: Id): Promise<void> {
+  return call(
+    api<void>(`/api/v1/comments/${commentId}`, { method: 'DELETE' }),
+    'Couldn’t delete that comment.',
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Split presets
+// ---------------------------------------------------------------------------
+
+export function listPresets(groupId: Id): Promise<SplitPreset[]> {
+  return call(api<SplitPreset[]>(`/api/v1/groups/${groupId}/presets`), 'Couldn’t load presets.')
+}
+
+export function createPreset(
+  groupId: Id,
+  input: Pick<SplitPreset, 'name' | 'method' | 'participants'>,
+): Promise<SplitPreset> {
+  return post(`/api/v1/groups/${groupId}/presets`, input, 'Couldn’t save that preset.')
+}
+
+export function deletePreset(presetId: Id): Promise<void> {
+  return call(
+    api<void>(`/api/v1/presets/${presetId}`, { method: 'DELETE' }),
+    'Couldn’t delete that preset.',
   )
 }
 
@@ -144,11 +263,9 @@ export function recordSettlement(
   groupId: Id,
   input: { fromUserId: Id; toUserId: Id; amountMinor: number; note: string | null },
 ): Promise<GroupSettlement> {
-  return call(
-    api<GroupSettlement>(`/api/v1/groups/${groupId}/settlements`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
+  return post(
+    `/api/v1/groups/${groupId}/settlements`,
+    input,
     'Couldn’t record the settlement.',
   )
 }
@@ -179,20 +296,25 @@ async function fetchSettlements(groupId: Id): Promise<GroupSettlement[]> {
   }))
 }
 
-export async function deleteSettlement(id: Id): Promise<void> {
-  if (isOffline()) throw new Error(OFFLINE_MESSAGE)
-  const { error } = await getSupabase().from('settlements').delete().eq('id', id)
-  if (error) {
-    if (isNetworkError(error)) throw new Error(OFFLINE_MESSAGE)
-    throwFriendly('delete the settlement', error)
-  }
+/** Via the API since 20260807110000: deleting a settlement puts a debt back on
+ * someone else's balance, and that has to appear in the group's history. */
+export function deleteSettlement(id: Id): Promise<void> {
+  return call(
+    api<void>(`/api/v1/settlements/${id}`, { method: 'DELETE' }),
+    'Couldn’t delete the settlement.',
+  )
 }
 
 // ---------------------------------------------------------------------------
 // Group expenses
 // ---------------------------------------------------------------------------
 
-type ExpenseRow = Tables<'expenses'> & { expense_splits: Tables<'expense_splits'>[] }
+type ExpenseRow = Tables<'expenses'> & {
+  expense_splits: Tables<'expense_splits'>[]
+  expense_items: (Tables<'expense_items'> & {
+    expense_item_shares: { user_id: string }[]
+  })[]
+}
 
 export function listGroupExpenses(groupId: Id): Promise<GroupExpense[]> {
   return cachedFetch(cacheKeys.groupExpenses(requireUserId(), groupId), () =>
@@ -203,15 +325,22 @@ export function listGroupExpenses(groupId: Id): Promise<GroupExpense[]> {
 async function fetchGroupExpenses(groupId: Id): Promise<GroupExpense[]> {
   const { data, error } = await getSupabase()
     .from('expenses')
-    .select('*, expense_splits(*)')
+    .select(
+      '*, expense_splits(*), expense_items(*, expense_item_shares(user_id))',
+    )
     .eq('group_id', groupId)
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
   if (error) throwFriendly('load expenses', error)
-  return (data as ExpenseRow[]).map((row) => ({
+  return (data as unknown as ExpenseRow[]).map(toGroupExpense)
+}
+
+function toGroupExpense(row: ExpenseRow): GroupExpense {
+  return {
     id: row.id,
     userId: row.user_id,
     groupId: row.group_id,
+    paidBy: row.paid_by,
     categoryId: row.category_id,
     description: row.description,
     amountMinor: row.amount_minor,
@@ -227,19 +356,23 @@ async function fetchGroupExpenses(groupId: Id): Promise<GroupExpense[]> {
       userId: split.user_id,
       owedMinor: split.owed_minor,
       shareBasisPoints: split.share_basis_points,
+      shareUnits: split.share_units,
       method: split.method as SplitMethod,
     })),
-  }))
+    items: (row.expense_items ?? [])
+      .map((item) => ({
+        id: item.id,
+        description: item.description,
+        amountMinor: item.amount_minor,
+        position: item.position,
+        participantIds: (item.expense_item_shares ?? []).map((share) => share.user_id),
+      }))
+      .sort((a, b) => a.position - b.position),
+  }
 }
 
 export function createGroupExpense(groupId: Id, input: GroupExpenseInput): Promise<GroupExpense> {
-  return call(
-    api<GroupExpense>(`/api/v1/groups/${groupId}/expenses`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
-    'Couldn’t save the expense.',
-  )
+  return post(`/api/v1/groups/${groupId}/expenses`, input, 'Couldn’t save the expense.')
 }
 
 export function updateGroupExpense(expenseId: Id, input: GroupExpenseInput): Promise<GroupExpense> {
@@ -252,11 +385,11 @@ export function updateGroupExpense(expenseId: Id, input: GroupExpenseInput): Pro
   )
 }
 
-export async function deleteGroupExpense(id: Id): Promise<void> {
-  if (isOffline()) throw new Error(OFFLINE_MESSAGE)
-  const { error } = await getSupabase().from('expenses').delete().eq('id', id)
-  if (error) {
-    if (isNetworkError(error)) throw new Error(OFFLINE_MESSAGE)
-    throwFriendly('delete the expense', error)
-  }
+/** Via the API since 20260807110000, for the same reason as settlements.
+ * `api()` already refuses offline, so there is no separate guard here. */
+export function deleteGroupExpense(id: Id): Promise<void> {
+  return call(
+    api<void>(`/api/v1/expenses/${id}`, { method: 'DELETE' }),
+    'Couldn’t delete the expense.',
+  )
 }
