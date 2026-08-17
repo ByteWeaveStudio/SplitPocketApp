@@ -12,16 +12,10 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
+import { AmountField } from '@/features/expense-composer/components/amount-field'
 import { CategoryField } from '@/features/expense-composer/components/category-field'
-import { SplitEditor } from '@/features/expense-composer/components/split-editor'
+import { NoteField } from '@/features/expense-composer/components/note-field'
+import { SplitSummary } from '@/features/expense-composer/components/split-summary'
 import {
   applyPreset,
   draftFromExpense,
@@ -31,7 +25,6 @@ import {
 } from '@/features/expense-composer/split-draft'
 import type { SplitDraft } from '@/features/expense-composer/split-draft'
 import { useDashboardStore } from '@/features/dashboard/dashboard-store'
-import { memberDisplayName } from '@/features/groups/display'
 import { useGroupDetailStore } from '@/features/groups/group-detail-store'
 import {
   createGroupExpense,
@@ -73,6 +66,9 @@ export function GroupExpenseForm({
   const [savingPreset, setSavingPreset] = useState(false)
   const [presetName, setPresetName] = useState('')
   const [saving, setSaving] = useState(false)
+  // Editing opens the split already expanded: reopening a saved expense is
+  // usually about who owes what, and the summary line would hide it.
+  const [splitOpen, setSplitOpen] = useState(() => editing !== null)
 
   useEffect(() => {
     let cancelled = false
@@ -104,6 +100,9 @@ export function GroupExpenseForm({
       return
     }
     if (summary.error) {
+      // The control that fixes this is inside the collapsed panel, so a toast
+      // alone would name a problem the user cannot reach.
+      setSplitOpen(true)
       toast.error(summary.error)
       return
     }
@@ -154,92 +153,74 @@ export function GroupExpenseForm({
   return (
     <>
       <form
-        className="flex flex-col gap-4 px-4 pt-2"
+        className="flex min-h-0 flex-1 flex-col"
         noValidate
         onSubmit={(event) => {
           event.preventDefault()
           void submit()
         }}
       >
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="gx-amount">Amount ({group.currency})</Label>
-          <Input
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+          <AmountField
             id="gx-amount"
-            inputMode="decimal"
-            placeholder="0.00"
-            autoFocus={!editing}
-            className="text-lg font-medium"
             value={amount}
-            onChange={(event) => setAmount(event.target.value)}
+            onChange={setAmount}
+            currency={group.currency}
+            autoFocus={!editing}
           />
-        </div>
 
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="gx-description">Description</Label>
-          <Input
-            id="gx-description"
-            placeholder="Dinner, taxi, hotel…"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="gx-paid-by">Paid by</Label>
-          <Select value={paidBy} onValueChange={setPaidBy}>
-            <SelectTrigger id="gx-paid-by">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {group.members.map((member) => (
-                <SelectItem key={member.userId} value={member.userId}>
-                  {memberDisplayName(member, myUserId)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <CategoryField id="gx-category" value={categoryId} onChange={setCategoryId} />
           <div className="flex flex-col gap-2">
-            <Label htmlFor="gx-date">Date</Label>
+            <Label htmlFor="gx-description">Description</Label>
             <Input
-              id="gx-date"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
+              id="gx-description"
+              placeholder="Dinner, taxi, hotel…"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
             />
           </div>
-        </div>
 
-        <SplitEditor
-          draft={draft}
-          onChange={setDraft}
-          members={group.members}
-          currency={group.currency}
-          myUserId={myUserId}
-          summary={summary}
-          presets={presets}
-          onApplyPreset={(preset) => setDraft((current) => applyPreset(current, preset, group.members))}
-          onSavePreset={() => setSavingPreset(true)}
-        />
+          <div className="grid grid-cols-2 gap-2 [&>*]:min-w-0">
+            <CategoryField id="gx-category" value={categoryId} onChange={setCategoryId} />
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="gx-date">Date</Label>
+              <Input
+                id="gx-date"
+                type="date"
+                value={date}
+                onChange={(event) => setDate(event.target.value)}
+              />
+            </div>
+          </div>
 
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="gx-notes">
-            Notes <span className="font-normal text-muted-foreground">(optional)</span>
-          </Label>
-          <Textarea
-            id="gx-notes"
-            rows={2}
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
+          <SplitSummary
+            open={splitOpen}
+            onOpenChange={setSplitOpen}
+            draft={draft}
+            onDraftChange={setDraft}
+            members={group.members}
+            currency={group.currency}
+            myUserId={myUserId}
+            paidBy={paidBy}
+            onPaidByChange={setPaidBy}
+            amountMinor={amountMinor}
+            summary={summary}
+            presets={presets}
+            onApplyPreset={(preset) =>
+              setDraft((current) => applyPreset(current, preset, group.members))
+            }
+            onSavePreset={() => setSavingPreset(true)}
           />
+
+          <NoteField id="gx-notes" value={notes} onChange={setNotes} />
         </div>
 
-        <Button type="submit" disabled={saving} className="mt-2 w-full">
-          {saving ? 'Saving…' : editing ? 'Save changes' : 'Add expense'}
-        </Button>
+        {/* Pinned: on a phone the sheet is the whole screen, and a submit that
+            scrolls away is the reason the old form felt long. */}
+        <div className="shrink-0 border-t bg-popover px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <Button type="submit" size="lg" disabled={saving} className="h-11 w-full">
+            {saving ? 'Saving…' : editing ? 'Save changes' : 'Add expense'}
+          </Button>
+        </div>
       </form>
 
       <Dialog open={savingPreset} onOpenChange={setSavingPreset}>

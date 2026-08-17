@@ -1,4 +1,5 @@
 import { equalSplit, itemizedOwed, proportional } from '@/features/expense-composer/split-math'
+import { memberDisplayName } from '@/features/groups/display'
 import type {
   GroupExpense,
   GroupExpenseInput,
@@ -34,12 +35,19 @@ export interface SplitDraft {
   items: DraftItem[]
 }
 
-export const SPLIT_METHODS: { value: SplitMethod; label: string; hint: string }[] = [
-  { value: 'equal', label: 'Equally', hint: 'Everyone selected pays the same.' },
-  { value: 'shares', label: 'By shares', hint: 'Weights — 2 shares is twice 1 share.' },
-  { value: 'custom', label: 'By amounts', hint: 'Type exactly what each person owes.' },
-  { value: 'percentage', label: 'By percent', hint: 'Percentages, adding up to 100%.' },
-  { value: 'itemized', label: 'By item', hint: 'List the bill; each line has its own people.' },
+/** `short` is the segmented-control label: five have to sit side by side on a
+ * 360px phone, so they are one word each. `label` is still the prose name. */
+export const SPLIT_METHODS: {
+  value: SplitMethod
+  label: string
+  short: string
+  hint: string
+}[] = [
+  { value: 'equal', label: 'Equally', short: 'Equally', hint: 'Everyone selected pays the same.' },
+  { value: 'shares', label: 'By shares', short: 'Shares', hint: 'Weights — 2 shares is twice 1 share.' },
+  { value: 'custom', label: 'By amounts', short: 'Amounts', hint: 'Type exactly what each person owes.' },
+  { value: 'percentage', label: 'By percent', short: '%', hint: 'Percentages, adding up to 100%.' },
+  { value: 'itemized', label: 'By item', short: 'Items', hint: 'List the bill; each line has its own people.' },
 ]
 
 let itemKeySeed = 0
@@ -291,6 +299,80 @@ export function summarizeSplit(
     }
   }
   return { owedByUser, remaining: null, error: null }
+}
+
+export interface SplitDescription {
+  /** What will happen to the money. */
+  headline: string
+  /** Who paid, and how many people are in on it. */
+  detail: string
+}
+
+function people(count: number): string {
+  return `${count} ${count === 1 ? 'person' : 'people'}`
+}
+
+/**
+ * The collapsed split row, in words.
+ *
+ * The composer's defaults — split equally, everyone in, you paid, today — are
+ * already right for nearly every expense, so the row states them instead of
+ * asking for them; the editor underneath only opens when one is wrong. That
+ * only works if the sentence is honest, so an equal split that doesn't divide
+ * cleanly (100 across 3) says "about" rather than naming a share nobody pays.
+ */
+export function describeSplit({
+  draft,
+  summary,
+  members,
+  currency,
+  amountMinor,
+  paidBy,
+  myUserId,
+  formatMoney,
+}: {
+  draft: SplitDraft
+  summary: SplitSummary
+  members: GroupMemberProfile[]
+  currency: CurrencyCode
+  amountMinor: number | null
+  paidBy: Id
+  myUserId: Id
+  formatMoney: (minor: number, currency: CurrencyCode) => string
+}): SplitDescription {
+  const payer = members.find((member) => member.userId === paidBy)
+  const payerName = payer ? memberDisplayName(payer, myUserId) : 'Someone else'
+
+  if (draft.method === 'itemized') {
+    const sharing = new Set(draft.items.flatMap((item) => item.participantIds)).size
+    const count = draft.items.length
+    return {
+      headline: count ? `By item · ${count} ${count === 1 ? 'line' : 'lines'}` : 'By item',
+      detail: sharing ? `${payerName} paid · ${people(sharing)}` : `${payerName} paid`,
+    }
+  }
+
+  const sharing = draft.selected.length
+  if (sharing === 0) {
+    return { headline: 'Nobody’s sharing this yet', detail: `${payerName} paid` }
+  }
+  const detail = `${payerName} paid · ${people(sharing)}`
+
+  if (draft.method === 'equal') {
+    const owed = [...summary.owedByUser.values()]
+    if (amountMinor === null || owed.length === 0) {
+      return { headline: `Split equally between ${sharing}`, detail }
+    }
+    const low = Math.min(...owed)
+    const even = low === Math.max(...owed)
+    return {
+      headline: `Split equally · ${even ? '' : 'about '}${formatMoney(low, currency)} each`,
+      detail,
+    }
+  }
+
+  const label = SPLIT_METHODS.find((entry) => entry.value === draft.method)?.label ?? 'Split'
+  return { headline: `Split ${label.toLowerCase()}`, detail }
 }
 
 /** The `method` / `participants` / `items` part of a create-or-update body. */

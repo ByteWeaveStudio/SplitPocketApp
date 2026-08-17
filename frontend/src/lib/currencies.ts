@@ -20,6 +20,22 @@ export function isSupportedCurrency(value: unknown): value is CurrencyCode {
   return typeof value === 'string' && CURRENCIES.some((currency) => currency.code === value)
 }
 
+/** The bare symbol, for the standalone prefix beside the amount field.
+ * `formatMoney` can't be used there — it would print a whole formatted value,
+ * and the number is a live input. Falls back to the code, which is never
+ * wrong, only longer. */
+export function currencySymbol(code: CurrencyCode): string {
+  try {
+    const part = new Intl.NumberFormat('en', { style: 'currency', currency: code })
+      .formatToParts(0)
+      .find((candidate) => candidate.type === 'currency')
+    if (part) return part.value
+  } catch {
+    // Unknown code — fall through to the table.
+  }
+  return CURRENCIES.find((currency) => currency.code === code)?.symbol ?? code
+}
+
 /** Minor-unit digits from Intl's ISO 4217 data; table is only a fallback. */
 export function currencyDecimalDigits(code: CurrencyCode): number {
   try {

@@ -1,4 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0e9f6e" />
-  <text x="32" y="44" font-family="system-ui, -apple-system, sans-serif" font-size="36" font-weight="700" fill="#ffffff" text-anchor="middle">S</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="SplitPocket">
+  <title>SplitPocket</title>
+  <defs>
+    <linearGradient id="spFavt" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="64" y2="64">
+      <stop offset="0" stop-color="#008a63" />
+      <stop offset="1" stop-color="#0c553d" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#spFavt)" />
+  <g transform="translate(13.400 12.160) scale(0.62000)">
+      <g fill="#ffffff">
+        <circle cx="10.26" cy="7.6" r="7.6" />
+        <path d="M0 20.2 H7.84 C16.24 20.2 26.5 28.85 26.5 35.92 V64 C11.92 64 0 54.36 0 42.58 Z" />
+      </g>
+      <g fill="#ffffff">
+        <circle cx="49.74" cy="7.6" r="7.6" />
+        <path d="M60 20.2 H52.16 C43.76 20.2 33.5 28.85 33.5 35.92 V64 C48.08 64 60 54.36 60 42.58 Z" />
+      </g>
+  </g>
 </svg>

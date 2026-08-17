@@ -28,6 +28,18 @@ export default defineConfig({
             type: 'image/svg+xml',
             purpose: 'any',
           },
+          // Android's installer ignores SVG icons, so ship raster too.
+          { src: 'pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          // Maskable is a separate drawing, not the same art tagged twice: the
+          // launcher crops to a shape of its choosing, so this one is
+          // full-bleed green with the mark inside the safe circle.
+          {
+            src: 'pwa-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
         ],
       },
       workbox: {

@@ -95,6 +95,17 @@
     --chart-4: oklch(0.55 0.13 245);
     --chart-5: oklch(0.55 0.18 25);
     --radius: 0.75rem;
+    /* Logo mark gradient, one pair per figure. Held as sRGB hex rather than
+       oklch so the in-app mark is byte-identical to the shipped favicon and
+       app icons, which have to stay in sRGB for native rasterisers.
+       Every stop sits on hue 165 — the hue --primary and the marketing site at
+       splitpocket.app are built on — so the ramp cannot drift out of the brand
+       family. It used to sweep 160°→170°, which read mint at the top and teal
+       at the bottom. The darkest stop is --primary exactly. */
+    --logo-1: #2bcb96;
+    --logo-2: #0baa7c;
+    --logo-3: #008f67;
+    --logo-4: #007654;
     --sidebar: oklch(0.968 0.005 110);
     --sidebar-foreground: oklch(0.18 0.012 155);
     --sidebar-primary: oklch(0.5 0.115 165);
@@ -134,6 +145,14 @@
     --chart-3: oklch(0.66 0.13 80);
     --chart-4: oklch(0.63 0.13 245);
     --chart-5: oklch(0.62 0.18 25);
+    /* Same intervals as the light ramp lifted ~0.14 in OKLCH L, with chroma
+       capped so the mint end does not glow against the near-black surface.
+       Held at hue 163 rather than the light ramp's 165, matching this theme's
+       --primary — the same 2° step the site takes between its two modes. */
+    --logo-1: #8bf2c3;
+    --logo-2: #5ed6a4;
+    --logo-3: #36bd8a;
+    --logo-4: #21a475;
     --sidebar: oklch(0.145 0.013 255);
     --sidebar-foreground: oklch(0.95 0.006 255);
     --sidebar-primary: oklch(0.78 0.14 163);

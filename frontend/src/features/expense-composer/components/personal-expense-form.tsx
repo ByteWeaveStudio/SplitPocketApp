@@ -13,8 +13,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
+import { AmountField } from '@/features/expense-composer/components/amount-field'
 import { CategoryField } from '@/features/expense-composer/components/category-field'
+import { NoteField } from '@/features/expense-composer/components/note-field'
 import type { ExpenseInput } from '@/features/personal-expenses/expenses-service'
 import { useExpensesStore } from '@/features/personal-expenses/expenses-store'
 import { ExpenseFormSchema } from '@/features/personal-expenses/schemas'
@@ -72,6 +73,10 @@ export function PersonalExpenseForm({
   const kind = watch('kind')
   const currency = watch('currency')
   const categoryId = watch('categoryId')
+  // Amount and notes are driven by controlled components rather than
+  // `register`, so their values have to be watched to render.
+  const amount = watch('amount')
+  const notes = watch('notes')
 
   function onSubmit(values: ExpenseFormValues) {
     // parseMoney already validated by the schema — non-null here.
@@ -99,88 +104,97 @@ export function PersonalExpenseForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 px-4 pt-2" noValidate>
-      <Tabs
-        value={kind}
-        onValueChange={(value) => setValue('kind', value as ExpenseFormValues['kind'])}
-      >
-        <TabsList className="w-full">
-          <TabsTrigger value="expense" className="flex-1">
-            Expense
-          </TabsTrigger>
-          <TabsTrigger value="income" className="flex-1">
-            Income
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+    <form onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col" noValidate>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+        {/* Income is not a default that can be stated in a summary line — it
+            changes what the record is — so the toggle stays on the surface. */}
+        <Tabs
+          value={kind}
+          onValueChange={(value) => setValue('kind', value as ExpenseFormValues['kind'])}
+        >
+          <TabsList className="w-full">
+            <TabsTrigger value="expense" className="flex-1">
+              Expense
+            </TabsTrigger>
+            <TabsTrigger value="income" className="flex-1">
+              Income
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="expense-amount">Amount</Label>
-        <div className="flex gap-2">
-          <Input
+        <div className="flex flex-col gap-1">
+          <AmountField
             id="expense-amount"
-            inputMode="decimal"
-            placeholder="0.00"
+            value={amount}
+            onChange={(value) => setValue('amount', value, { shouldValidate: false })}
+            currency={currency}
             autoFocus
-            className="flex-1 text-lg font-medium"
-            aria-invalid={errors.amount ? true : undefined}
-            {...register('amount')}
-          />
-          <Select value={currency} onValueChange={(value) => setValue('currency', value)}>
-            <SelectTrigger className="w-28" aria-label="Currency">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CURRENCIES.map((option) => (
-                <SelectItem key={option.code} value={option.code}>
-                  {option.code} {option.symbol}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            invalid={Boolean(errors.amount)}
+          >
+            <Select value={currency} onValueChange={(value) => setValue('currency', value)}>
+              <SelectTrigger
+                size="sm"
+                aria-label="Currency"
+                className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-accent/50"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CURRENCIES.map((option) => (
+                  <SelectItem key={option.code} value={option.code}>
+                    {option.code} {option.symbol}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </AmountField>
+          <div className="text-center">
+            <FieldError message={errors.amount?.message} />
+          </div>
         </div>
-        <FieldError message={errors.amount?.message} />
-      </div>
 
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="expense-description">Description</Label>
-        <Input
-          id="expense-description"
-          placeholder={kind === 'income' ? 'Salary, refund…' : 'Coffee, groceries…'}
-          aria-invalid={errors.description ? true : undefined}
-          {...register('description')}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="expense-description">Description</Label>
+          <Input
+            id="expense-description"
+            placeholder={kind === 'income' ? 'Salary, refund…' : 'Coffee, groceries…'}
+            aria-invalid={errors.description ? true : undefined}
+            {...register('description')}
+          />
+          <FieldError message={errors.description?.message} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 [&>*]:min-w-0">
+          <CategoryField
+            id="expense-category"
+            value={categoryId}
+            onChange={(value) => setValue('categoryId', value)}
+          />
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="expense-date">Date</Label>
+            <Input
+              id="expense-date"
+              type="date"
+              aria-invalid={errors.date ? true : undefined}
+              {...register('date')}
+            />
+            <FieldError message={errors.date?.message} />
+          </div>
+        </div>
+
+        <NoteField
+          id="expense-notes"
+          value={notes}
+          onChange={(value) => setValue('notes', value)}
         />
-        <FieldError message={errors.description?.message} />
-      </div>
-
-      <CategoryField
-        id="expense-category"
-        value={categoryId}
-        onChange={(value) => setValue('categoryId', value)}
-      />
-
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="expense-date">Date</Label>
-        <Input
-          id="expense-date"
-          type="date"
-          aria-invalid={errors.date ? true : undefined}
-          {...register('date')}
-        />
-        <FieldError message={errors.date?.message} />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="expense-notes">
-          Notes <span className="font-normal text-muted-foreground">(optional)</span>
-        </Label>
-        <Textarea id="expense-notes" rows={2} {...register('notes')} />
         <FieldError message={errors.notes?.message} />
       </div>
 
-      <Button type="submit" className="mt-2 w-full">
-        {editing ? 'Save changes' : kind === 'income' ? 'Add income' : 'Add expense'}
-      </Button>
+      <div className="shrink-0 border-t bg-popover px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <Button type="submit" size="lg" className="h-11 w-full">
+          {editing ? 'Save changes' : kind === 'income' ? 'Add income' : 'Add expense'}
+        </Button>
+      </div>
     </form>
   )
 }

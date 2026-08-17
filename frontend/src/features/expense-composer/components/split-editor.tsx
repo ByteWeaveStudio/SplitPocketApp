@@ -5,13 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { MemberAvatar } from '@/features/groups/components/member-avatar'
 import { memberDisplayName } from '@/features/groups/display'
 import type { GroupMemberProfile, SplitPreset } from '@/features/groups/types'
 import { SPLIT_METHODS, newItem } from '@/features/expense-composer/split-draft'
@@ -74,21 +68,35 @@ export function SplitEditor({
   return (
     <fieldset className="flex flex-col gap-3">
       <div className="flex flex-col gap-2">
-        <Label asChild>
+        <Label asChild className="sr-only">
           <legend>How to split</legend>
         </Label>
-        <Select value={draft.method} onValueChange={(value) => setMethod(value as SplitMethod)}>
-          <SelectTrigger aria-label="Split method">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {SPLIT_METHODS.map((entry) => (
-              <SelectItem key={entry.value} value={entry.value}>
-                {entry.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* All five methods sit on the surface rather than behind a dropdown:
+            choosing one is a comparison, and the panel is only open because
+            the default was already wrong. */}
+        <div role="radiogroup" aria-label="Split method" className="flex gap-0.5 rounded-lg bg-muted p-0.5">
+          {SPLIT_METHODS.map((entry) => {
+            const active = draft.method === entry.value
+            return (
+              <button
+                key={entry.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setMethod(entry.value)}
+                className={cn(
+                  'min-w-0 flex-1 rounded-md px-1 py-1.5 text-xs transition-colors',
+                  'focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none',
+                  active
+                    ? 'bg-card font-semibold text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {entry.short}
+              </button>
+            )
+          })}
+        </div>
         {methodHint && <p className="text-xs text-muted-foreground">{methodHint}</p>}
       </div>
 
@@ -139,22 +147,31 @@ export function SplitEditor({
               {allSelected ? 'Clear all' : 'Select everyone'}
             </Button>
           </div>
-          <ul className="flex flex-col gap-1 rounded-xl border p-2">
+          <ul className="flex flex-col">
             {members.map((member) => {
               const isSelected = draft.selected.includes(member.userId)
               const owed = summary.owedByUser.get(member.userId)
               return (
-                <li key={member.userId} className="flex items-center gap-3 px-2 py-1.5">
+                <li
+                  key={member.userId}
+                  className={cn(
+                    'flex items-center gap-2.5 py-1.5 transition-opacity',
+                    !isSelected && 'opacity-55',
+                  )}
+                >
                   <Checkbox
                     id={`split-${member.userId}`}
                     checked={isSelected}
                     onCheckedChange={() => toggleMember(member.userId)}
                   />
+                  {/* The avatar rides inside the label so the whole name-and-
+                      face target toggles the person, not just the box. */}
                   <Label
                     htmlFor={`split-${member.userId}`}
-                    className="min-w-0 flex-1 truncate font-normal"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 font-normal"
                   >
-                    {memberDisplayName(member, myUserId)}
+                    <MemberAvatar member={member} className="size-7 border-0" />
+                    <span className="truncate">{memberDisplayName(member, myUserId)}</span>
                   </Label>
                   {isSelected && (
                     <ShareInput
@@ -165,7 +182,7 @@ export function SplitEditor({
                     />
                   )}
                   {isSelected && owed !== undefined && (
-                    <span className="money w-20 shrink-0 text-right text-sm text-muted-foreground">
+                    <span className="money shrink-0 text-right text-sm font-medium tabular-nums">
                       {formatMoney(owed, currency)}
                     </span>
                   )}

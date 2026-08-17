@@ -1,7 +1,6 @@
 import { User, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -43,20 +42,20 @@ export function ExpenseComposer() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
+      {/* gap-0 because the body now owns its own rhythm, and the submit bar
+          has to sit flush against the bottom edge to stay pinned. */}
       <SheetContent
         side={isDesktop ? 'right' : 'bottom'}
-        className="data-[side=bottom]:max-h-[92svh] data-[side=bottom]:rounded-t-2xl data-[side=right]:sm:max-w-md"
+        className="gap-0 data-[side=bottom]:max-h-[92svh] data-[side=bottom]:rounded-t-2xl data-[side=right]:sm:max-w-md"
       >
-        <div className="overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {open && (
-            <ComposerBody
-              key={session}
-              editing={editing}
-              initialGroupId={initialGroupId}
-              onDone={() => setOpen(false)}
-            />
-          )}
-        </div>
+        {open && (
+          <ComposerBody
+            key={session}
+            editing={editing}
+            initialGroupId={initialGroupId}
+            onDone={() => setOpen(false)}
+          />
+        )}
       </SheetContent>
     </Sheet>
   )
@@ -89,32 +88,34 @@ function ComposerBody({
     target === PERSONAL ? undefined : groups.find((candidate) => candidate.id === target)
   const locked = editing !== null
 
+  const Icon = group ? Users : User
+
   return (
     <>
-      <SheetHeader>
+      {/* The target reads as context, not a question: opened from inside a
+          group it is already correct, so it sits as a pill under the title
+          rather than as the first labelled field of a form. */}
+      <SheetHeader className="items-center gap-2 pb-3 text-center">
         <SheetTitle>{editing ? 'Edit expense' : 'Add expense'}</SheetTitle>
-        <SheetDescription>
+        <SheetDescription className="sr-only">
           {group
             ? `Split it with ${group.name} — in ${group.currency}.`
             : 'Log an expense or income — only what happened, no ceremony.'}
         </SheetDescription>
-      </SheetHeader>
 
-      <div className="flex flex-col gap-2 px-4 pt-4">
-        <Label htmlFor="composer-target">Add to</Label>
         {locked ? (
-          <p className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
-            {group ? (
-              <Users className="size-4 text-muted-foreground" aria-hidden />
-            ) : (
-              <User className="size-4 text-muted-foreground" aria-hidden />
-            )}
+          <p className="flex h-9 items-center gap-2 rounded-full border bg-muted/50 px-3.5 text-sm font-medium">
+            <Icon className="size-4 text-muted-foreground" aria-hidden />
             {group ? group.name : 'Personal'}
-            <span className="text-xs text-muted-foreground">· can’t be moved</span>
+            <span className="text-xs font-normal text-muted-foreground">· can’t be moved</span>
           </p>
         ) : (
           <Select value={target} onValueChange={setTarget}>
-            <SelectTrigger id="composer-target">
+            <SelectTrigger
+              id="composer-target"
+              aria-label="Add to"
+              className="h-9 w-auto max-w-full rounded-full bg-secondary px-3.5 font-medium"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -136,7 +137,7 @@ function ComposerBody({
             That group isn’t available right now.
           </p>
         )}
-      </div>
+      </SheetHeader>
 
       {group ? (
         // Keyed by group: the split draft is a list of that group's member
