@@ -14,10 +14,15 @@ talks to Firebase Auth and Cloud Firestore directly, and Firestore security
 rules are the access boundary.
 
 The Supabase project and the FastAPI service that used to own group writes
-have both been removed. **Group features are temporarily disabled** — the
-screens are still there and render their empty states, but every group write
-rejects with "Group features are being rebuilt on Firebase." Personal
-expenses, income, categories, the dashboard and all of auth are live.
+have both been removed, and everything they did now runs in the browser:
+split arithmetic (`features/groups/split-compute.ts`), balances and debt
+simplification (`features/groups/balances.ts`), membership rules, invite
+links, the activity feed and settlements. Every feature is live.
+
+One capability did not survive the move. **Adding a member by email is gone** —
+it needed an email→account lookup, and `profiles/{uid}` is readable only by its
+owner precisely so the client cannot enumerate accounts. The "Add member"
+button now opens the invite-link flow, which does the same job.
 
 ## Repository layout
 
@@ -147,18 +152,47 @@ Four things are worth knowing before changing any of it:
    `YYYY-MM-DD` string so range filters and month keys keep comparing
    lexicographically.
 
+### Writing a query the rules will accept
+
+Security rules are **not** filters. For a list, Firestore proves from the
+query's constraints alone that every document it could match is readable — it
+never looks at the documents. A query whose filters don't line up with the rule
+is refused outright, with `permission-denied`, even against an empty collection.
+
+Every group-scoped rule here asks `uid in resource.data.memberIds`, so **every
+list query against those collections must carry
+`where('memberIds', 'array-contains', uid)`** — including ones that already
+narrow by `groupId` or `expenseId`, and including the personal-expense queries
+(a personal expense has `memberIds == [ownerId]`, so it says the same thing in
+the terms the rule is written in).
+
+Add that clause first, then add the matching entry to
+`firestore.indexes.json` with `memberIds` as the leading field.
+
 ### Known gaps in client-only enforcement
 
-The app is strictly client-side, so three things Postgres guaranteed are now
-weaker. All three are deliberate:
+The app is strictly client-side, so some things Postgres guaranteed are now
+weaker. All of them are deliberate:
 
 - **Split totals are trusted from the client.** Rules have no loop or sum
   construct, so `sum(splits[].owedMinor) == amountMinor` cannot be checked.
 - **Invite `maxUses` is advisory.** Rules cannot atomically
   increment-and-check a counter. Expiry and revocation *are* enforced.
 - **Membership changes fan out.** Adding or removing a member rewrites
-  `memberIds` on every expense, settlement, comment, activity row and preset
-  in that group, in batches with no cross-batch transaction.
+  `memberIds` on every expense, settlement, comment, activity row and preset in
+  that group (`fanOutMemberIds` in `features/groups/group-docs.ts`), in batches
+  of 500 with no cross-batch transaction. The group document is always written
+  first, because that is what gates discovery: a removed member can no longer
+  list the group, so they cannot reach any stragglers by query. Re-running is
+  safe — each write is an assignment, not a delta.
+- **Multi-document writes are batches, not transactions.** A batch fails or
+  succeeds as a unit, which covers "expense plus its activity entry", but
+  nothing spans a read and a write. Invite acceptance is the case where that
+  shows: the server locked the row, so two people could not spend the last use
+  at once. Here they can.
+- **Deletes cascade in application code.** Postgres had ON DELETE CASCADE;
+  `deleteGroupCascade` spells it out, and deleting an expense removes its
+  comments explicitly.
 
 ## Deploying the web app
 
@@ -295,7 +329,6 @@ Swift Package Manager (no CocoaPods needed).
 - [ ] Android: signed `.aab` uploaded, closed-test clock started
 - [ ] iOS: archive uploaded to TestFlight
 - [ ] Upload keystore backed up outside the repo
-- [ ] Group features re-enabled, or the rebuild banner reworded for launch
 
 ## Rolling back
 

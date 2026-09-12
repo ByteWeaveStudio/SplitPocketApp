@@ -110,9 +110,20 @@ function toDocument(userId: Id, input: ExpenseInput) {
 // reached the server yet.
 // ---------------------------------------------------------------------------
 
+/**
+ * Filters on `memberIds`, not `ownerId`, and that is not incidental.
+ *
+ * Firestore security rules are not filters: for a list, the server has to
+ * prove from the query's constraints alone that every document it could match
+ * is readable, without looking at any of them. The read rule for `expenses`
+ * asks whether the caller is in `memberIds`, so a query that only constrains
+ * `ownerId` cannot be proved safe and is rejected outright — even when the
+ * collection is empty. A personal expense has `memberIds == [ownerId]`, so
+ * this says exactly the same thing in the terms the rule is written in.
+ */
 function personalExpensesQuery(userId: Id, from: string, to: string, withCreatedAt: boolean) {
   const clauses = [
-    where('ownerId', '==', userId),
+    where('memberIds', 'array-contains', userId),
     where('groupId', '==', null),
     where('date', '>=', from),
     where('date', '<', to),

@@ -34,7 +34,6 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useComposerStore } from '@/features/expense-composer/composer-store'
 import { ActivityFeed } from '@/features/groups/components/activity-feed'
-import { AddMemberDialog } from '@/features/groups/components/add-member-dialog'
 import { ExpenseDetailDialog } from '@/features/groups/components/expense-detail-dialog'
 import { GroupSettingsDialog } from '@/features/groups/components/group-settings-dialog'
 import { InviteDialog } from '@/features/groups/components/invite-dialog'
@@ -114,7 +113,6 @@ function GroupDetail({
   const openComposer = useComposerStore((state) => state.openNew)
   const openComposerEdit = useComposerStore((state) => state.openEdit)
 
-  const [addingMember, setAddingMember] = useState(false)
   const [inviting, setInviting] = useState(false)
   const [editingSettings, setEditingSettings] = useState(false)
   const [viewing, setViewing] = useState<GroupExpense | null>(null)
@@ -249,7 +247,7 @@ function GroupDetail({
             myUserId={myUserId}
             isOwner={isOwner}
             archived={archived}
-            onAddMember={() => setAddingMember(true)}
+            onAddMember={() => setInviting(true)}
             onInvite={() => setInviting(true)}
           />,
           <SettlementsCard
@@ -291,7 +289,6 @@ function GroupDetail({
           if (!open) setViewing(null)
         }}
       />
-      <AddMemberDialog groupId={group.id} open={addingMember} onOpenChange={setAddingMember} />
       <InviteDialog groupId={group.id} open={inviting} onOpenChange={setInviting} />
       <GroupSettingsDialog
         group={group}

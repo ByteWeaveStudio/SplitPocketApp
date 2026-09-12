@@ -22,6 +22,14 @@ service cloud.firestore {
       return request.resource.data[field] == resource.data[field];
     }
 
+    // A membership change rewrites `memberIds` on every document of the group
+    // (see fanOutMemberIds in features/groups/group-docs.ts). That is the cost
+    // of denormalizing membership for zero-read authorization, and it means
+    // otherwise-immutable documents have to accept this one narrow edit.
+    function onlyMemberIdsChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds']);
+    }
+
     // ---- expenses ---------------------------------------------------------
     // Replaces three Postgres guards that no longer have a server to run in:
     //   check income_is_personal     — income is never a group expense
@@ -48,11 +56,17 @@ service cloud.firestore {
                     && validExpense(request.resource.data);
       // Any member may correct a group expense (v1 was creator-only, which
       // left a group unable to fix a typo made by someone who has left).
+      //
+      // The membership fan-out is exempted from validExpense on purpose:
+      // removing the person who paid for something leaves `paidBy` pointing
+      // outside `memberIds`, and that is the correct end state — the ledger
+      // still owes them. Re-validating would refuse the very write that
+      // records the removal.
       allow update: if signedIn()
                     && isMember(resource.data)
-                    && validExpense(request.resource.data)
                     && unchanged('ownerId')
-                    && unchanged('groupId');
+                    && unchanged('groupId')
+                    && (onlyMemberIdsChanged() || validExpense(request.resource.data));
       allow delete: if signedIn() && isMember(resource.data);
     }
 
@@ -79,7 +93,7 @@ service cloud.firestore {
     }
 
     // ---- groups -----------------------------------------------------------
-    function inviteFor(groupId) {
+    function inviteFor() {
       return get(
         /databases/$(database)/documents/groupInvites/$(
           request.resource.data.members[uid()].viaInvite
@@ -94,8 +108,10 @@ service cloud.firestore {
     // Gap: maxUses. Rules cannot atomically increment-and-check a counter, so
     // use counts are advisory.
     function joiningViaInvite(groupId) {
-      let invite = inviteFor(groupId);
-      return request.resource.data.memberIds.hasOnly(resource.data.memberIds.concat([uid()]))
+      let invite = inviteFor();
+      return request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['memberIds', 'members', 'lastActivityAt'])
+          && request.resource.data.memberIds.hasOnly(resource.data.memberIds.concat([uid()]))
           && request.resource.data.memberIds.hasAll([uid()])
           && invite.groupId == groupId
           && invite.revokedAt == null
@@ -109,7 +125,9 @@ service cloud.firestore {
                     && request.resource.data.memberIds == [uid()];
       allow update: if signedIn()
                     && (isMember(resource.data) || joiningViaInvite(groupId));
-      allow delete: if signedIn() && resource.data.createdBy == uid();
+      // Any member, not just the creator: the last person out deletes the
+      // group behind them, and that is rarely whoever made it.
+      allow delete: if signedIn() && isMember(resource.data);
     }
 
     // ---- group invites ----------------------------------------------------
@@ -120,9 +138,15 @@ service cloud.firestore {
     match /groupInvites/{token} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.createdBy == uid();
-      // Revoking, and incrementing `uses` on accept.
+      // Deliberately open to any signed-in holder of the token: accepting an
+      // invite increments `uses`, and the person doing that is by definition
+      // not yet a member of the group. Knowing the token is the credential.
       allow update: if signedIn();
-      allow delete: if signedIn() && resource.data.createdBy == uid();
+      // Cold path, so a lookup is affordable: the creator, or anyone still in
+      // the group (the cascade when a group is deleted).
+      allow delete: if signedIn()
+                    && (resource.data.createdBy == uid()
+                        || uid() in get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.memberIds);
     }
 
     // ---- everything else keyed to a group --------------------------------
@@ -140,7 +164,12 @@ service cloud.firestore {
       allow create: if signedIn()
                     && isMember(request.resource.data)
                     && request.resource.data.userId == uid();
-      allow update, delete: if signedIn() && resource.data.userId == uid();
+      allow update: if signedIn()
+                    && (resource.data.userId == uid()
+                        || (isMember(resource.data) && onlyMemberIdsChanged()));
+      // Members can delete their own; anyone who can edit the parent expense
+      // takes the comments with it when the expense goes.
+      allow delete: if signedIn() && isMember(resource.data);
     }
 
     // Append-only history. Entries denormalize the actor's display name at
@@ -150,7 +179,10 @@ service cloud.firestore {
       allow create: if signedIn()
                     && isMember(request.resource.data)
                     && request.resource.data.actorId == uid();
-      allow update, delete: if false;
+      // Append-only in substance: the only permitted edit is the membership
+      // fan-out, and the only permitted delete is the group cascade.
+      allow update: if signedIn() && isMember(resource.data) && onlyMemberIdsChanged();
+      allow delete: if signedIn() && isMember(resource.data);
     }
 
     match /splitPresets/{presetId} {
@@ -161,7 +193,7 @@ service cloud.firestore {
                     && presetId == request.resource.data.groupId + '__'
                                  + request.resource.data.slug;
       allow delete: if signedIn() && isMember(resource.data);
-      allow update: if false;
+      allow update: if signedIn() && isMember(resource.data) && onlyMemberIdsChanged();
     }
 
     // Anything not matched above is denied.
