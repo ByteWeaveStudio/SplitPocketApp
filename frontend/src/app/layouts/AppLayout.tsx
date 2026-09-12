@@ -10,7 +10,7 @@ import { ExpenseComposer } from '@/features/expense-composer/components/expense-
 import { useComposerStore } from '@/features/expense-composer/composer-store'
 import { useNewExpenseShortcut } from '@/hooks/use-new-expense-shortcut'
 import { cn } from '@/lib/utils'
-import { isSupabaseConfigured } from '@/services/supabase'
+import { GROUPS_DISABLED_NOTICE } from '@/features/groups/groups-service'
 
 interface NavItem {
   to: string
@@ -39,12 +39,9 @@ export function AppLayout() {
       <div className="flex min-h-svh flex-col">
         <MobileHeader />
         <ConnectivityBanner />
-        {!isSupabaseConfigured && (
-          <p className="border-b bg-secondary px-4 py-2 text-center text-xs text-muted-foreground">
-            Supabase isn't configured — running in local preview. Copy frontend/.env.example to
-            .env.local to enable sign-in.
-          </p>
-        )}
+        <p className="border-b bg-secondary px-4 py-2 text-center text-xs text-muted-foreground">
+          {GROUPS_DISABLED_NOTICE}
+        </p>
         <main className="flex-1 px-4 pb-28 pt-4 md:px-8 md:py-8">
           {/* Keyed by route so each page gets one entrance animation. */}
           <div key={pathname} className="page-enter mx-auto w-full max-w-4xl">

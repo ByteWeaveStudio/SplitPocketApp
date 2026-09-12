@@ -1,24 +1,19 @@
-import type { PostgrestError } from '@supabase/supabase-js'
+import {
+  collection,
+  doc,
+  getDocs,
+  orderBy,
+  query,
+  setDoc,
+  where,
+  Timestamp,
+} from 'firebase/firestore'
 
-import { cacheKeys, cachedFetch } from '@/services/offline/cache'
-import { isNetworkError, isOffline } from '@/services/offline/net'
-import { enqueueOp, listOps } from '@/services/offline/outbox'
-import type { OutboxOp } from '@/services/offline/outbox'
-import { getSupabase } from '@/services/supabase'
+import { DEFAULT_CATEGORIES } from '@/features/categories/default-categories'
+import { getDb } from '@/services/firebase'
+import { friendlyFirestoreMessage, toIso, trackWrite } from '@/services/firestore'
 import { useAuthStore } from '@/stores/auth-store'
-import type { Category, Id, Tables } from '@/types'
-
-type CategoryRow = Tables<'categories'>
-
-function toCategory(row: CategoryRow): Category {
-  return {
-    id: row.id,
-    name: row.name,
-    icon: row.icon,
-    userId: row.user_id,
-    createdAt: row.created_at,
-  }
-}
+import type { Category, Id } from '@/types'
 
 function requireUserId(): Id {
   const user = useAuthStore.getState().user
@@ -26,91 +21,78 @@ function requireUserId(): Id {
   return user.id
 }
 
-function throwFriendly(action: string, error: PostgrestError): never {
-  if (error.code === '23505') {
-    throw new Error('You already have a category with this name.')
-  }
-  throw new Error(`Couldn't ${action}. ${error.message}`)
+/**
+ * `{uid}__{slug}` — the document id carries the uniqueness Postgres enforced
+ * with a unique index on (user_id, lower(name)). Firestore has no unique
+ * indexes, so encoding the key in the id is what makes a duplicate name
+ * impossible rather than merely checked.
+ */
+function slugify(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
-async function fetchCategories(): Promise<Category[]> {
-  const { data, error } = await getSupabase()
-    .from('categories')
-    .select('*')
-    .order('user_id', { ascending: true, nullsFirst: true })
-    .order('name', { ascending: true })
-  if (error) throwFriendly('load categories', error)
-  return data.map(toCategory)
+function categoryId(userId: Id, name: string): string {
+  return `${userId}__${slugify(name)}`
 }
 
 /** Built-in defaults plus the user's own, defaults first, A→Z within each. */
 export async function listCategories(): Promise<Category[]> {
   const userId = requireUserId()
-  let categories: Category[]
   try {
-    categories = await cachedFetch(cacheKeys.categories(userId), fetchCategories)
+    // Served from the persistent cache when offline — no separate fallback.
+    const snapshot = await getDocs(
+      query(
+        collection(getDb(), 'categories'),
+        where('ownerId', '==', userId),
+        orderBy('name', 'asc'),
+      ),
+    )
+    const own = snapshot.docs.map<Category>((d) => {
+      const data = d.data()
+      return {
+        id: d.id,
+        name: data.name as string,
+        icon: data.icon as string,
+        userId,
+        createdAt: toIso(data.createdAt),
+      }
+    })
+    return [...DEFAULT_CATEGORIES, ...own]
   } catch (error) {
-    // Same distinction as listExpensesForMonth: a failed request is not
-    // evidence that the device is offline.
-    if (isOffline()) {
-      throw new Error('You’re offline and categories aren’t saved on this device yet.')
-    }
-    if (isNetworkError(error)) {
-      throw new Error('Couldn’t reach the server, and categories aren’t saved on this device yet.')
-    }
-    throw error
+    throw new Error(friendlyFirestoreMessage(error, 'Couldn’t load categories.'))
   }
-  // Categories created offline stay visible across reloads until they sync.
-  const pending = await listOps(userId)
-  for (const entry of pending) {
-    if (entry.op.kind !== 'category.create') continue
-    const op = entry.op
-    if (categories.some((category) => category.id === op.entityId)) continue
-    categories = [
-      ...categories,
-      { id: op.entityId, name: op.name, icon: op.icon, userId, createdAt: entry.queuedAt },
-    ]
-  }
-  return categories
-}
-
-async function insertCategoryRow(userId: Id, id: Id, name: string, icon: string): Promise<Category> {
-  const { data, error } = await getSupabase()
-    .from('categories')
-    .insert({ id, user_id: userId, name, icon })
-    .select()
-    .single()
-  if (error) throw error
-  return toCategory(data)
 }
 
 export async function createCategory(name: string, icon = 'tag'): Promise<Category> {
   const userId = requireUserId()
-  const id = crypto.randomUUID()
-  // Attempted regardless of the offline hint — same reasoning as createExpense.
-  try {
-    return await insertCategoryRow(userId, id, name, icon)
-  } catch (error) {
-    if (!isNetworkError(error)) throwFriendly('create the category', error as PostgrestError)
-  }
-  // Mirror the server's case-insensitive uniqueness so the queued create
-  // can't collide (and take dependent expenses down with it) on replay.
-  const known = await listCategories().catch(() => [] as Category[])
-  const clashes = known.some(
-    (category) =>
-      category.userId === userId && category.name.toLowerCase() === name.toLowerCase(),
-  )
-  if (clashes) throw new Error('You already have a category with this name.')
-  await enqueueOp(userId, { kind: 'category.create', entityId: id, name, icon })
-  return { id, name, icon, userId, createdAt: new Date().toISOString() }
-}
+  const slug = slugify(name)
+  if (!slug) throw new Error('Give the category a name.')
 
-/** Replay for the sync runner; a category that already synced is a no-op. */
-export async function replayCategoryOp(userId: Id, op: OutboxOp): Promise<void> {
-  if (op.kind !== 'category.create') return
-  try {
-    await insertCategoryRow(userId, op.entityId, op.name, op.icon)
-  } catch (error) {
-    if ((error as PostgrestError).code !== '23505') throw error
+  // Mirror the old unique index as a friendly error before the write, since a
+  // rules rejection would only surface later as a toast.
+  const known = await listCategories().catch(() => [] as Category[])
+  if (known.some((category) => category.name.toLowerCase() === name.trim().toLowerCase())) {
+    throw new Error('You already have a category with this name.')
   }
+
+  const id = categoryId(userId, name)
+  const createdAt = new Date().toISOString()
+  // Not awaited: Firestore applies it locally at once and resolves only on the
+  // server ack, which never comes while offline. See services/firestore.ts.
+  trackWrite(
+    id,
+    setDoc(doc(getDb(), 'categories', id), {
+      ownerId: userId,
+      name: name.trim(),
+      slug,
+      icon,
+      createdAt: Timestamp.now(),
+    }),
+    'create the category',
+  )
+  return { id, name: name.trim(), icon, userId, createdAt }
 }

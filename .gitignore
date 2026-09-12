@@ -8,13 +8,12 @@ docs/
 .claude/
 .impeccable/
 
-# Environment files (both apps) — keep the examples tracked
+# Environment files. Nothing in the app reads one — the Firebase web config
+# lives in src/services/firebase.ts — but keep these ignored so a stray local
+# file never lands in a commit.
 .env
 .env.*
-!.env.example
 
-# Python
-backend/.venv/
-__pycache__/
-*.pyc
-.ruff_cache/
+# Firebase CLI
+.firebase/
+firebase-debug.log

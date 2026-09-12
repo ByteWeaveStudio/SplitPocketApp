@@ -1,0 +1,169 @@
+rules_version = '2';
+
+// SplitPocket — client-only access rules.
+//
+// There is no server. Everything the FastAPI service used to enforce either
+// lives here, is structural in the document layout, or is documented below as
+// a deliberate gap. The design rule throughout: authorization must not need a
+// get(), so membership is denormalized onto every document as `memberIds`.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+
+    // Membership is carried by the document itself, so this costs no reads.
+    function isMember(d) { return uid() in d.memberIds; }
+
+    // Personal documents are the degenerate case: memberIds == [ownerId].
+    function isOwner(d) { return d.ownerId == uid(); }
+
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    // ---- expenses ---------------------------------------------------------
+    // Replaces three Postgres guards that no longer have a server to run in:
+    //   check income_is_personal     — income is never a group expense
+    //   trigger expenses_enforce_payer — a personal expense is paid by its
+    //     owner; a group expense's payer must be a member
+    //   check amount_minor > 0
+    //
+    // Not enforceable here: sum(splits[].owedMinor) == amountMinor. Rules have
+    // no loop or sum construct. Nesting splits inside the expense document at
+    // least makes the write atomic, so a half-written split set is impossible.
+    function validExpense(d) {
+      return d.amountMinor is int
+          && d.amountMinor > 0
+          && d.kind in ['expense', 'income']
+          && (d.kind == 'expense' || d.groupId == null)
+          && (d.groupId == null ? d.paidBy == d.ownerId : d.paidBy in d.memberIds)
+          && uid() in d.memberIds;
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if signedIn() && isMember(resource.data);
+      allow create: if signedIn()
+                    && isOwner(request.resource.data)
+                    && validExpense(request.resource.data);
+      // Any member may correct a group expense (v1 was creator-only, which
+      // left a group unable to fix a typo made by someone who has left).
+      allow update: if signedIn()
+                    && isMember(resource.data)
+                    && validExpense(request.resource.data)
+                    && unchanged('ownerId')
+                    && unchanged('groupId');
+      allow delete: if signedIn() && isMember(resource.data);
+    }
+
+    // ---- profiles ---------------------------------------------------------
+    // Readable only by their owner. Member names and avatars are denormalized
+    // into groups/{id}.members, so nothing ever needs to read someone else's
+    // profile — which also means there is no email -> uid lookup, and no way
+    // to enumerate accounts.
+    match /profiles/{userId} {
+      allow read, write: if signedIn() && uid() == userId;
+    }
+
+    // ---- categories -------------------------------------------------------
+    // The 14 built-in defaults are frontend constants, not documents; only
+    // user-created categories live here. The document id is
+    // `{uid}__{nameSlug}`, which makes the old unique index on
+    // (user_id, lower(name)) structural rather than checked.
+    match /categories/{categoryId} {
+      allow read: if signedIn() && isOwner(resource.data);
+      allow create: if signedIn()
+                    && isOwner(request.resource.data)
+                    && categoryId == uid() + '__' + request.resource.data.slug;
+      allow update, delete: if signedIn() && isOwner(resource.data);
+    }
+
+    // ---- groups -----------------------------------------------------------
+    function inviteFor(groupId) {
+      return get(
+        /databases/$(database)/documents/groupInvites/$(
+          request.resource.data.members[uid()].viaInvite
+        )
+      ).data;
+    }
+
+    // The one cold path that needs a lookup. The joining user adds only
+    // themselves and names the invite token they used; the token is an
+    // unguessable document id, so producing a valid one is the proof.
+    //
+    // Gap: maxUses. Rules cannot atomically increment-and-check a counter, so
+    // use counts are advisory.
+    function joiningViaInvite(groupId) {
+      let invite = inviteFor(groupId);
+      return request.resource.data.memberIds.hasOnly(resource.data.memberIds.concat([uid()]))
+          && request.resource.data.memberIds.hasAll([uid()])
+          && invite.groupId == groupId
+          && invite.revokedAt == null
+          && invite.expiresAt > request.time;
+    }
+
+    match /groups/{groupId} {
+      allow read: if signedIn() && isMember(resource.data);
+      allow create: if signedIn()
+                    && request.resource.data.createdBy == uid()
+                    && request.resource.data.memberIds == [uid()];
+      allow update: if signedIn()
+                    && (isMember(resource.data) || joiningViaInvite(groupId));
+      allow delete: if signedIn() && resource.data.createdBy == uid();
+    }
+
+    // ---- group invites ----------------------------------------------------
+    // The document id IS the bearer token. Postgres stored only a SHA-256 hash
+    // because the server could compare without revealing; a client has to read
+    // the document to accept it, so the token is necessarily readable by
+    // whoever holds it. Knowing the id is the credential.
+    match /groupInvites/{token} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.createdBy == uid();
+      // Revoking, and incrementing `uses` on accept.
+      allow update: if signedIn();
+      allow delete: if signedIn() && resource.data.createdBy == uid();
+    }
+
+    // ---- everything else keyed to a group --------------------------------
+    match /settlements/{settlementId} {
+      allow read: if signedIn() && isMember(resource.data);
+      allow create: if signedIn()
+                    && isMember(request.resource.data)
+                    && request.resource.data.amountMinor > 0
+                    && request.resource.data.fromUserId != request.resource.data.toUserId;
+      allow update, delete: if signedIn() && isMember(resource.data);
+    }
+
+    match /comments/{commentId} {
+      allow read: if signedIn() && isMember(resource.data);
+      allow create: if signedIn()
+                    && isMember(request.resource.data)
+                    && request.resource.data.userId == uid();
+      allow update, delete: if signedIn() && resource.data.userId == uid();
+    }
+
+    // Append-only history. Entries denormalize the actor's display name at
+    // write time so the feed stays readable after someone leaves.
+    match /groupActivity/{activityId} {
+      allow read: if signedIn() && isMember(resource.data);
+      allow create: if signedIn()
+                    && isMember(request.resource.data)
+                    && request.resource.data.actorId == uid();
+      allow update, delete: if false;
+    }
+
+    match /splitPresets/{presetId} {
+      allow read: if signedIn() && isMember(resource.data);
+      allow create: if signedIn()
+                    && isMember(request.resource.data)
+                    && request.resource.data.createdBy == uid()
+                    && presetId == request.resource.data.groupId + '__'
+                                 + request.resource.data.slug;
+      allow delete: if signedIn() && isMember(resource.data);
+      allow update: if false;
+    }
+
+    // Anything not matched above is denied.
+  }
+}

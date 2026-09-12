@@ -38,10 +38,9 @@ export const useGroupsStore = create<GroupsState>()((set, get) => ({
   load: async () => {
     if (get().status === 'loading') return
     set({ status: 'loading', error: null })
-    // The two halves come from different backends: the list is a Supabase read,
-    // the nets are a Python API call. Settled separately so an API outage costs
-    // the amounts, not the page — losing the list to a balances failure reads
-    // to the user as "my groups are gone".
+    // Settled separately so a failure in the amounts costs the amounts, not
+    // the page — losing the list to a balances failure reads to the user as
+    // "my groups are gone".
     const [listed, netted] = await Promise.allSettled([listGroups(), getMyBalances()])
 
     if (listed.status === 'rejected') {

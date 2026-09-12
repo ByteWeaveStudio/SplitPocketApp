@@ -17,8 +17,8 @@ import {
 import type { LucideIcon } from 'lucide-react'
 
 /**
- * Explicit map of the icons the seeded categories use (see
- * supabase/migrations/*seed_categories.sql) so tree-shaking keeps working —
+ * Explicit map of the icons the built-in categories use (see
+ * features/categories/default-categories.ts) so tree-shaking keeps working —
  * importing lucide's full `icons` object would pull every icon into the
  * bundle. Custom categories fall back to the tag icon.
  */

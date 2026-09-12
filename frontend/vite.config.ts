@@ -1,8 +1,31 @@
+import { copyFileSync } from 'node:fs'
 import path from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import type { Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+
+/**
+ * GitHub Pages has no rewrite rules, so a cold load of /groups/abc is a 404
+ * rather than the app. Pages does serve 404.html for any unmatched path, so
+ * shipping a copy of index.html under that name turns its error page into the
+ * SPA entry point and react-router takes it from there.
+ *
+ * Listed after VitePWA so the file is written once the service worker has
+ * already globbed the build — the precache should hold index.html, not a
+ * byte-identical twin of it.
+ */
+function spaFallback(): Plugin {
+  return {
+    name: 'splitpocket:spa-fallback-404',
+    apply: 'build',
+    closeBundle() {
+      const dist = path.resolve(import.meta.dirname, 'dist')
+      copyFileSync(path.join(dist, 'index.html'), path.join(dist, '404.html'))
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -10,8 +33,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     // Precache the app shell so the web app boots offline (native builds
-    // already serve assets locally). Data comes from the IndexedDB cache;
-    // API/Supabase requests are never intercepted.
+    // already serve assets locally). Data comes from Firestore's own
+    // persistent cache; Firebase requests are never intercepted.
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
@@ -44,11 +67,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        globIgnores: ['404.html'],
         navigateFallback: 'index.html',
-        // Never serve index.html for backend or Supabase auth callbacks.
-        navigateFallbackDenylist: [/^\/api\//, /^\/docs/],
       },
     }),
+    spaFallback(),
   ],
   resolve: {
     alias: {

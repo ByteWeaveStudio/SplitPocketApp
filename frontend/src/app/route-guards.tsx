@@ -3,7 +3,6 @@ import { Navigate, useLocation } from 'react-router-dom'
 
 import { BrandMark } from '@/components/brand-mark'
 import { safeInternalPath } from '@/lib/navigation'
-import { isSupabaseConfigured } from '@/services/supabase'
 import { useAuthStore } from '@/stores/auth-store'
 
 function SplashScreen() {
@@ -18,10 +17,6 @@ function SplashScreen() {
 export function RequireAuth({ children }: { children: ReactNode }) {
   const status = useAuthStore((state) => state.status)
   const location = useLocation()
-
-  // Without Supabase configured there is no auth to enforce — let the shell
-  // render in local preview mode (a banner in the layout explains it).
-  if (!isSupabaseConfigured) return <>{children}</>
 
   if (status === 'loading') return <SplashScreen />
   if (status === 'signedOut') {
@@ -40,8 +35,6 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 export function RedirectIfSignedIn({ children }: { children: ReactNode }) {
   const status = useAuthStore((state) => state.status)
   const location = useLocation()
-
-  if (!isSupabaseConfigured) return <>{children}</>
 
   if (status === 'loading') return <SplashScreen />
   if (status === 'signedIn') {

@@ -16,7 +16,7 @@ interface AuthState {
   clearSession: () => void
 }
 
-/** Populated by AuthListener in providers.tsx from Supabase session events. */
+/** Populated by AuthListener in providers.tsx from Firebase auth state. */
 export const useAuthStore = create<AuthState>()((set) => ({
   status: 'loading',
   user: null,

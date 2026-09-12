@@ -1,18 +1,19 @@
 import { useEffect } from 'react'
+import { onAuthStateChanged } from 'firebase/auth'
 import { ThemeProvider, useTheme } from 'next-themes'
 import { RouterProvider } from 'react-router-dom'
 
 import { router } from '@/app/router'
 import { Toaster } from '@/components/ui/sonner'
-import { toSessionUser } from '@/features/auth/auth-service'
+import { ensureProfile, toSessionUser } from '@/features/auth/auth-service'
 import { useCategoriesStore } from '@/features/categories/categories-store'
 import { useDashboardStore } from '@/features/dashboard/dashboard-store'
 import { useGroupDetailStore } from '@/features/groups/group-detail-store'
 import { useGroupsStore } from '@/features/groups/groups-store'
 import { useExpensesStore } from '@/features/personal-expenses/expenses-store'
 import { DEFAULT_THEME } from '@/lib/theme'
-import { initSync, onSignedIn, onSignedOut } from '@/services/offline/sync'
-import { getSupabase, isSupabaseConfigured } from '@/services/supabase'
+import { initConnectivity } from '@/services/connectivity'
+import { getFirebaseAuth } from '@/services/firebase'
 import { useAuthStore } from '@/stores/auth-store'
 
 const THEME_COLORS = { light: '#f8f8f5', dark: '#04060a' } as const
@@ -44,21 +45,24 @@ function ThemeColorSync() {
   return null
 }
 
-/** Mirrors the Supabase session into the auth store (INITIAL_SESSION included). */
+/** Mirrors the Firebase session into the auth store (initial state included). */
 function AuthListener() {
   useEffect(() => {
-    if (!isSupabaseConfigured) {
-      useAuthStore.getState().clearSession()
-      return
-    }
-    const { data } = getSupabase().auth.onAuthStateChange((_event, session) => {
-      // No async work in this callback (supabase-js deadlocks on it) — store
-      // writes only; onSignedIn/onSignedOut defer their work with setTimeout.
-      if (session) {
+    return onAuthStateChanged(getFirebaseAuth(), (user) => {
+      if (user) {
         const alreadySignedIn = useAuthStore.getState().status === 'signedIn'
-        useAuthStore.getState().setSession(toSessionUser(session.user))
-        // First session event of this app load: sync anything queued offline.
-        if (!alreadySignedIn) onSignedIn(session.user.id)
+        useAuthStore.getState().setSession(toSessionUser(user))
+        // Postgres created the profile row from a trigger on auth.users. With
+        // no server, the client has to do it — and here rather than only in
+        // sign-up, or anyone arriving through Google or Apple never gets one.
+        // Deferred so no async work runs inside the callback.
+        if (!alreadySignedIn) {
+          setTimeout(() => {
+            void ensureProfile(user).catch(() => {
+              // Offline: the write is queued by Firestore and lands on its own.
+            })
+          }, 0)
+        }
       } else {
         useAuthStore.getState().clearSession()
         // Drop the previous account's data so the next sign-in starts clean.
@@ -67,18 +71,16 @@ function AuthListener() {
         useGroupsStore.getState().reset()
         useGroupDetailStore.getState().reset()
         useDashboardStore.getState().reset()
-        onSignedOut()
       }
     })
-    return () => data.subscription.unsubscribe()
   }, [])
 
   return null
 }
 
-/** Connectivity tracking + outbox flush on reconnect. */
+/** Browser connectivity tracking; Firestore handles sync by itself. */
 function SyncListener() {
-  useEffect(() => initSync(), [])
+  useEffect(() => initConnectivity(), [])
   return null
 }
 

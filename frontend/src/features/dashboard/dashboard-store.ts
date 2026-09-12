@@ -1,13 +1,17 @@
+import { collection, getDocs, limit as fsLimit, orderBy, query, where } from 'firebase/firestore'
 import { create } from 'zustand'
 
 import { getMyBalances, listGroups } from '@/features/groups/groups-service'
 import type { GroupWithMembers, MyGroupBalance } from '@/features/groups/types'
-import { listExpensesForMonth } from '@/features/personal-expenses/expenses-service'
+import {
+  listExpensesForMonth,
+  toExpense,
+} from '@/features/personal-expenses/expenses-service'
 import { currentMonthKey } from '@/lib/dates'
-import { cacheKeys, cachedFetch } from '@/services/offline/cache'
-import { getSupabase } from '@/services/supabase'
+import { getDb } from '@/services/firebase'
+import { friendlyFirestoreMessage } from '@/services/firestore'
 import { useAuthStore } from '@/stores/auth-store'
-import type { Expense, ExpenseKind } from '@/types'
+import type { Expense } from '@/types'
 
 export interface RecentExpense extends Expense {
   groupName: string | null
@@ -34,34 +38,33 @@ interface DashboardState {
   reset: () => void
 }
 
-function listRecent(limit: number): Promise<RecentExpense[]> {
+/**
+ * Everything the user can see, personal and group alike, newest first.
+ *
+ * Postgres left the scoping to RLS and joined `groups(name)` for the label.
+ * Firestore has neither, so membership is carried on each document as
+ * `memberIds` (== [ownerId] for a personal expense) and the group's name is
+ * denormalized onto the expense as `groupName`.
+ */
+async function listRecent(limit: number): Promise<RecentExpense[]> {
   const userId = useAuthStore.getState().user?.id ?? ''
-  return cachedFetch(cacheKeys.recentActivity(userId), () => fetchRecent(limit))
-}
-
-async function fetchRecent(limit: number): Promise<RecentExpense[]> {
-  const { data, error } = await getSupabase()
-    .from('expenses')
-    .select('*, groups(name)')
-    .order('created_at', { ascending: false })
-    .limit(limit)
-  if (error) throw new Error(`Couldn't load recent activity. ${error.message}`)
-  return data.map((row) => ({
-    id: row.id,
-    userId: row.user_id,
-    groupId: row.group_id,
-    paidBy: row.paid_by,
-    categoryId: row.category_id,
-    description: row.description,
-    amountMinor: row.amount_minor,
-    currency: row.currency,
-    date: row.date,
-    kind: row.kind as ExpenseKind,
-    notes: row.notes,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    groupName: (row.groups as { name: string } | null)?.name ?? null,
-  }))
+  if (!userId) return []
+  try {
+    const snapshot = await getDocs(
+      query(
+        collection(getDb(), 'expenses'),
+        where('memberIds', 'array-contains', userId),
+        orderBy('createdAt', 'desc'),
+        fsLimit(limit),
+      ),
+    )
+    return snapshot.docs.map((d) => ({
+      ...toExpense(d),
+      groupName: (d.data().groupName as string | null) ?? null,
+    }))
+  } catch (error) {
+    throw new Error(friendlyFirestoreMessage(error, 'Couldn’t load recent activity.'))
+  }
 }
 
 export const useDashboardStore = create<DashboardState>()((set, get) => ({
@@ -75,9 +78,8 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
   load: async () => {
     if (get().status === 'loading') return
     set({ status: 'loading', error: null })
-    // Group balances are the only section that needs the Python API; the rest
-    // is Supabase. Settled separately so an API outage costs that one section
-    // instead of the whole dashboard.
+    // Settled separately so one failing section costs that section instead
+    // of the whole dashboard.
     const [month, recentActivity, balances, groups] = await Promise.allSettled([
       listExpensesForMonth(currentMonthKey()),
       listRecent(8),
